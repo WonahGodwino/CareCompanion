@@ -24,6 +24,16 @@ fun RecallBiometricScreen(
     viewModel: RecallBiometricViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isScannerBusy = uiState.step == RecallStep.SCANNING || uiState.step == RecallStep.MATCHING
+    val scannerReadyLabel = when {
+        isScannerBusy -> "Busy"
+        uiState.isScannerReady -> "Ready"
+        else -> "Not Ready"
+    }
+    val scannerReadyPositive = isScannerBusy || uiState.isScannerReady
+    val scannerSummaryText = "Connected: ${if (uiState.isScannerConnected) "Yes" else "No"} | " +
+        "Access: ${if (uiState.isScannerAccessGranted) "Granted" else "Not granted"} | " +
+        "Ready: ${if (isScannerBusy) "Busy" else if (uiState.isScannerReady) "Yes" else "No"}"
 
     Scaffold(
         topBar = {
@@ -65,49 +75,22 @@ fun RecallBiometricScreen(
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(Modifier.height(4.dp))
-                        Text(uiState.scannerInfoText, style = MaterialTheme.typography.labelSmall)
+                        Text(scannerSummaryText, style = MaterialTheme.typography.labelSmall)
                     }
                     Spacer(Modifier.width(8.dp))
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerConnected)
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            else
-                                MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerConnected) "Connected" else "Disconnected",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerAccessGranted)
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            else
-                                MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerAccessGranted) "Access Granted" else "Access Needed",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerReady)
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            else
-                                MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerReady) "Ready" else "Not Ready",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
+                        StatusBadge(
+                            label = if (uiState.isScannerConnected) "Connected" else "Disconnected",
+                            isPositive = uiState.isScannerConnected
+                        )
+                        StatusBadge(
+                            label = if (uiState.isScannerAccessGranted) "Access Granted" else "Access Needed",
+                            isPositive = uiState.isScannerAccessGranted
+                        )
+                        StatusBadge(
+                            label = scannerReadyLabel,
+                            isPositive = scannerReadyPositive
+                        )
                     }
                 }
             }
@@ -192,6 +175,21 @@ private fun friendlyScannerHint(
     if (!isScannerAccessGranted) return "Scanner detected, but USB access is not granted. Tap Retry and allow USB permission."
     if (!isScannerReady) return "Scanner connected and permitted, but still preparing. Wait a few seconds and try again."
     return "Scanner is ready. Try scanning again."
+}
+
+@Composable
+private fun StatusBadge(label: String, isPositive: Boolean) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (isPositive) androidx.compose.ui.graphics.Color(0xFF2E7D32) else androidx.compose.ui.graphics.Color(0xFFC62828)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = androidx.compose.ui.graphics.Color.White,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
 }
 
 @Composable

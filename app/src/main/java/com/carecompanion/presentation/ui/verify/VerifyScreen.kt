@@ -36,6 +36,16 @@ fun VerifyScreen(
     patientPickerViewModel: RecallViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isScannerBusy = uiState.step == VerifyStep.SCANNING || uiState.step == VerifyStep.MATCHING
+    val scannerReadyLabel = when {
+        isScannerBusy -> "Busy"
+        uiState.isScannerReady -> "Ready"
+        else -> "Not Ready"
+    }
+    val scannerReadyPositive = isScannerBusy || uiState.isScannerReady
+    val scannerSummaryText = "Connected: ${if (uiState.isScannerConnected) "Yes" else "No"} | " +
+        "Access: ${if (uiState.isScannerAccessGranted) "Granted" else "Not granted"} | " +
+        "Ready: ${if (isScannerBusy) "Busy" else if (uiState.isScannerReady) "Yes" else "No"}"
     val selectedPatient by sharedViewModel.selectedPatient.collectAsState()
     val patientPickerState by patientPickerViewModel.uiState.collectAsState()
     var showPatientPicker by remember { mutableStateOf(false) }
@@ -77,40 +87,22 @@ fun VerifyScreen(
                             Text("${uiState.selectedClientTemplateGroups} template groups loaded", style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text(uiState.scannerInfoText, style = MaterialTheme.typography.labelSmall)
+                        Text(scannerSummaryText, style = MaterialTheme.typography.labelSmall)
                     }
                     Spacer(Modifier.width(8.dp))
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerConnected) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerConnected) "Connected" else "Disconnected",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerAccessGranted) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerAccessGranted) "Access Granted" else "Access Needed",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (uiState.isScannerReady) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (uiState.isScannerReady) "Ready" else "Not Ready",
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
+                        StatusBadge(
+                            label = if (uiState.isScannerConnected) "Connected" else "Disconnected",
+                            isPositive = uiState.isScannerConnected
+                        )
+                        StatusBadge(
+                            label = if (uiState.isScannerAccessGranted) "Access Granted" else "Access Needed",
+                            isPositive = uiState.isScannerAccessGranted
+                        )
+                        StatusBadge(
+                            label = scannerReadyLabel,
+                            isPositive = scannerReadyPositive
+                        )
                     }
                 }
             }
@@ -334,6 +326,21 @@ fun VerifyScreen(
             confirmButton = {
                 TextButton(onClick = { showPatientPicker = false }) { Text("Close") }
             }
+        )
+    }
+}
+
+@Composable
+private fun StatusBadge(label: String, isPositive: Boolean) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (isPositive) Color(0xFF2E7D32) else Color(0xFFC62828)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
 }
