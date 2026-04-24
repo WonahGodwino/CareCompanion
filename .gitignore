@@ -1,0 +1,54 @@
+# Android/Gradle build outputs
+.gradle/
+**/build/
+captures/
+externalNativeBuild/
+.cxx/
+
+# IDE/editor files
+.idea/
+*.iml
+.vscode/
+
+# Local machine configuration
+local.properties
+
+# Security-sensitive signing and key material
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+keystore.properties
+signing.properties
+
+# API secrets and environment files
+.env
+.env.*
+secrets.properties
+google-services.json
+
+# Python virtual environment and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Logs and generated reports
+*.log
+build_output.txt
+compilation_output.txt
+
+# Local database dumps / snapshots
+care_companion_db_dump/
+care_companion_db_local/
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary API artifacts
+temp_api.json
+
+# OS files
+.DS_Store
+Thumbs.db

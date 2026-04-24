@@ -1,0 +1,6 @@
+﻿<resources>
+    <style name="Theme.CareCompanionApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/care_blue</item>
+        <item name="android:navigationBarColor">@color/black</item>
+    </style>
+</resources>

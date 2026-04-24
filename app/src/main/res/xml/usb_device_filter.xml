@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+    USB device filter for SecuGen fingerprint scanners (Vendor ID 0x1E80 = 7808 decimal).
+    Product IDs cover: Hamster III/IV/Pro/Plus, iGO Match-on-Card, Hamster Pro 20 (UPx), FDU05.
+    Register via AndroidManifest meta-data on USB_DEVICE_ATTACHED intent.
+-->
+<resources>
+    <!-- Match any product for SecuGen VID 0x1E80 -->
+    <usb-device vendor-id="7808" />
+    <!-- Match any product for SecuGen legacy VID 0x1162 -->
+    <usb-device vendor-id="4450" />
+
+    <!-- SecuGen Hamster III -->
+    <usb-device vendor-id="7808" product-id="0" />
+    <!-- SecuGen Hamster IV -->
+    <usb-device vendor-id="7808" product-id="9" />
+    <!-- SecuGen Hamster Pro -->
+    <usb-device vendor-id="7808" product-id="10" />
+    <!-- SecuGen iGO Match-on-Card -->
+    <usb-device vendor-id="7808" product-id="11" />
+    <!-- SecuGen Hamster Pro 20 / UPx -->
+    <usb-device vendor-id="7808" product-id="12" />
+    <!-- SecuGen FDU05 -->
+    <usb-device vendor-id="7808" product-id="16" />
+    <!-- SecuGen Hamster Plus -->
+    <usb-device vendor-id="7808" product-id="17" />
+</resources>
