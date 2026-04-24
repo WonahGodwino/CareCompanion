@@ -62,7 +62,8 @@ object SecuGenDevice {
         0x000B, // iGO Match-on-Card
         0x000C, // Hamster Pro 20 (UPx)
         0x0010, // FDU05
-        0x0011  // Hamster Plus
+        0x0011, // Hamster Plus
+        0x2200  // SecuGen USB U20
     )
 }
 

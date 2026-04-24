@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
  */
 class SecuGenScanner(
     private val context: Context,
-    @Suppress("UNUSED_PARAMETER") usbDevice: UsbDevice,   // kept for API compatibility; SDK discovers device via UsbManager
+    private val usbDevice: UsbDevice,
     private val templateFormat: Int = SecuGenTemplateFormat.TEMPLATE_FORMAT_ISO19794,
     private val securityLevel: Int  = SecuGenSecurityLevel.SL_NORMAL
 ) : BiometricScanner {
@@ -74,8 +74,13 @@ class SecuGenScanner(
             // 2. Set the template format before opening the device
             check(lib.SetTemplateFormat(templateFormat.toShort()), "SetTemplateFormat")
 
-            // 3. Open the device (SG_DEV_AUTO lets the SDK auto-detect any connected device)
+            // 3. Initialise the SDK with auto device-type detection
             check(lib.Init(SGFDxDeviceName.SG_DEV_AUTO), "Init")
+
+            // 4. Open the physical USB device (index 0 = first attached SecuGen device).
+            //    Permission must already be granted (ensured by BiometricManager before
+            //    this call). Without OpenDevice() GetDeviceInfo() and all capture calls fail.
+            check(lib.OpenDevice(0), "OpenDevice")
 
             sgfpm = lib
 
