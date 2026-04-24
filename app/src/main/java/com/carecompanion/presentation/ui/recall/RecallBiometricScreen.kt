@@ -30,7 +30,11 @@ fun RecallBiometricScreen(
         uiState.isScannerReady -> "Ready"
         else -> "Not Ready"
     }
-    val scannerReadyPositive = isScannerBusy || uiState.isScannerReady
+    val scannerReadyStatus = when {
+        isScannerBusy -> ScannerBadgeStatus.Busy
+        uiState.isScannerReady -> ScannerBadgeStatus.Positive
+        else -> ScannerBadgeStatus.Negative
+    }
     val scannerSummaryText = "Connected: ${if (uiState.isScannerConnected) "Yes" else "No"} | " +
         "Access: ${if (uiState.isScannerAccessGranted) "Granted" else "Not granted"} | " +
         "Ready: ${if (isScannerBusy) "Busy" else if (uiState.isScannerReady) "Yes" else "No"}"
@@ -81,15 +85,15 @@ fun RecallBiometricScreen(
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         StatusBadge(
                             label = if (uiState.isScannerConnected) "Connected" else "Disconnected",
-                            isPositive = uiState.isScannerConnected
+                            status = if (uiState.isScannerConnected) ScannerBadgeStatus.Positive else ScannerBadgeStatus.Negative
                         )
                         StatusBadge(
                             label = if (uiState.isScannerAccessGranted) "Access Granted" else "Access Needed",
-                            isPositive = uiState.isScannerAccessGranted
+                            status = if (uiState.isScannerAccessGranted) ScannerBadgeStatus.Positive else ScannerBadgeStatus.Negative
                         )
                         StatusBadge(
                             label = scannerReadyLabel,
-                            isPositive = scannerReadyPositive
+                            status = scannerReadyStatus
                         )
                     }
                 }
@@ -178,19 +182,26 @@ private fun friendlyScannerHint(
 }
 
 @Composable
-private fun StatusBadge(label: String, isPositive: Boolean) {
+private fun StatusBadge(label: String, status: ScannerBadgeStatus) {
+    val (background, textColor) = when (status) {
+        ScannerBadgeStatus.Positive -> androidx.compose.ui.graphics.Color(0xFF2E7D32) to androidx.compose.ui.graphics.Color.White
+        ScannerBadgeStatus.Negative -> androidx.compose.ui.graphics.Color(0xFFC62828) to androidx.compose.ui.graphics.Color.White
+        ScannerBadgeStatus.Busy -> androidx.compose.ui.graphics.Color(0xFFF9A825) to androidx.compose.ui.graphics.Color.Black
+    }
     Surface(
         shape = MaterialTheme.shapes.small,
-        color = if (isPositive) androidx.compose.ui.graphics.Color(0xFF2E7D32) else androidx.compose.ui.graphics.Color(0xFFC62828)
+        color = background
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = androidx.compose.ui.graphics.Color.White,
+            color = textColor,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
 }
+
+private enum class ScannerBadgeStatus { Positive, Negative, Busy }
 
 @Composable
 private fun IdleContent(isScannerReady: Boolean, onScanClick: () -> Unit) {
