@@ -78,8 +78,11 @@ class SetupActivity : AppCompatActivity() {
         if (username.isEmpty()) { etUsername.error = "Username is required"; return }
         if (password.isEmpty()) { etPassword.error = "Password is required"; return }
 
-        val normalized = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) rawUrl else "http://$rawUrl"
-        val baseUrl = normalized.trimEnd('/') + "/"
+        val baseUrl = SharedPreferencesHelper.normalizeBaseUrl(rawUrl)
+            ?: run {
+                etEmrUrl.error = "Server URL is required"
+                return
+            }
         setLoading(true, "Authenticating…")
 
         lifecycleScope.launch {

@@ -51,23 +51,21 @@ class IITViewModel @Inject constructor(
 
     private fun facilityId() = SharedPreferencesHelper.getActiveFacilityId(context)
 
-    /** PEPFAR IIT cutoff — today minus 28 days. Recomputed each subscription. */
-    private fun iitCutoff(): Date = Calendar.getInstance(watTimeZone).apply {
-        add(Calendar.DAY_OF_YEAR, -28)
-    }.time
+    /** Current time in milliseconds (epoch). Recomputed each subscription. */
+    private fun todayMs(): Long = System.currentTimeMillis()
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     private val iitFlow: Flow<List<IITClient>> = _searchQuery
         .debounce(300)
         .distinctUntilChanged()
         .flatMapLatest { query ->
-            val cutoff = iitCutoff()
+            val now = todayMs()
             val fid = facilityId()
             when {
-                query.isBlank() && fid > 0 -> patientRepository.observeIITClientsByFacility(cutoff, fid)
-                query.isBlank()            -> patientRepository.observeIITClients(cutoff)
-                fid > 0                    -> patientRepository.observeIITSearchByFacility(query, cutoff, fid)
-                else                       -> patientRepository.observeIITSearch(query, cutoff)
+                query.isBlank() && fid > 0 -> patientRepository.observeIITClientsByFacility(now, fid)
+                query.isBlank()            -> patientRepository.observeIITClients(now)
+                fid > 0                    -> patientRepository.observeIITSearchByFacility(query, now, fid)
+                else                       -> patientRepository.observeIITSearch(query, now)
             }
         }
 

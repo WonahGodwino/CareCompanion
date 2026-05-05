@@ -137,15 +137,25 @@ class BiometricManager @Inject constructor() {
     fun initialize(context: Context) {
         appContext = context.applicationContext
 
-        val receiverFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-            Context.RECEIVER_EXPORTED else 0
+        // Fix for API level 26+ lint error: Only use receiverFlag overload on API 26+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val receiverFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                Context.RECEIVER_EXPORTED else 0
 
-        context.registerReceiver(usbPermissionReceiver,
-            IntentFilter(ACTION_USB_PERMISSION), receiverFlag)
-        context.registerReceiver(usbAttachReceiver,
-            IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED), receiverFlag)
-        context.registerReceiver(usbDetachReceiver,
-            IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED), receiverFlag)
+            context.registerReceiver(usbPermissionReceiver,
+                IntentFilter(ACTION_USB_PERMISSION), receiverFlag)
+            context.registerReceiver(usbAttachReceiver,
+                IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED), receiverFlag)
+            context.registerReceiver(usbDetachReceiver,
+                IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED), receiverFlag)
+        } else {
+            context.registerReceiver(usbPermissionReceiver,
+                IntentFilter(ACTION_USB_PERMISSION))
+            context.registerReceiver(usbAttachReceiver,
+                IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED))
+            context.registerReceiver(usbDetachReceiver,
+                IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED))
+        }
 
         // Check if a scanner is already plugged in
         UsbBiometricScanner.findSupportedDevice(context)?.let { device ->

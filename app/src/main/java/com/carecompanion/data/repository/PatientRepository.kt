@@ -26,9 +26,14 @@ interface PatientRepository {
     fun observeSearchByFacility(query: String, facilityId: Long): Flow<List<Patient>>
     fun observeActiveCount(): Flow<Int>
     fun observeActiveCountByFacility(facilityId: Long): Flow<Int>
-    // IIT (Interruption in Treatment) — PEPFAR: missed refill ≥ 28 days
-    fun observeIITClients(cutoffDate: Date): Flow<List<IITClient>>
-    fun observeIITClientsByFacility(cutoffDate: Date, facilityId: Long): Flow<List<IITClient>>
-    fun observeIITSearch(q: String, cutoffDate: Date): Flow<List<IITClient>>
-    fun observeIITSearchByFacility(q: String, cutoffDate: Date, facilityId: Long): Flow<List<IITClient>>
+    // IIT (Interruption in Treatment) — patient whose expected return (nextAppointment + refillPeriod days) has passed
+    fun observeIITClients(todayMs: Long): Flow<List<IITClient>>
+    fun observeIITClientsByFacility(todayMs: Long, facilityId: Long): Flow<List<IITClient>>
+    fun observeIITSearch(q: String, todayMs: Long): Flow<List<IITClient>>
+    fun observeIITSearchByFacility(q: String, todayMs: Long, facilityId: Long): Flow<List<IITClient>>
+    // Missed Appointments — patient whose nextAppointment date has passed (1+ days overdue)
+    fun observeMissedApptClients(todayMs: Long): Flow<List<IITClient>>
+    fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long): Flow<List<IITClient>>
+    fun observeMissedApptSearch(q: String, todayMs: Long): Flow<List<IITClient>>
+    fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long): Flow<List<IITClient>>
 }

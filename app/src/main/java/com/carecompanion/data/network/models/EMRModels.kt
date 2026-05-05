@@ -108,8 +108,73 @@ data class PatientBiometricResponse(
 )
 
 data class EMRPatient(val id: Long, val uuid: String, val hospitalNumber: String, val firstName: String?, val surname: String?, val otherName: String?, val fullName: String?, val sex: String?, val dateOfBirth: String?, val isDateOfBirthEstimated: Boolean=false, val ninNumber: String?, val emrId: String?, val phoneNumber: String?, val facilityId: Long, val lastModifiedDate: String, val isActive: Boolean=true, val archived: Int=0)
-data class EMRBiometric(val id: String, val personUuid: String, val template: String, val biometricType: String?, val templateType: String?, val enrollmentDate: String?, val deviceName: String?, val imageQuality: Int?, val iso: Boolean=false, val versionIso20: Boolean=false, val lastModifiedDate: String)
-data class EMRArtPharmacy(val id: Long, val personUuid: String, val visitDate: String, val nextAppointment: String?, val regimenId: Long?, val mmdType: String?, val refillPeriod: Int?, val dsdModel: String?, val adherence: Boolean?, val lastModifiedDate: String)
+data class EMRBiometric(
+    val id: String,
+    val personUuid: String,
+    val template: String,
+    val biometricType: String?,
+    val templateType: String?,
+    val enrollmentDate: String?,
+    val deviceName: String?,
+    val imageQuality: Int?,
+    val iso: Boolean = false,
+    val versionIso20: Boolean = false,
+    val lastModifiedDate: String,
+    // --- additional fields aligned with emr_biometric server schema ---
+    val archived: Int? = null,
+    val count: Int? = null,
+    val createdBy: String? = null,
+    val createdDate: String? = null,
+    val extra: String? = null,
+    val facilityId: Long? = null,
+    val hashed: String? = null,
+    val lastModifiedBy: String? = null,
+    val matchBiometricId: String? = null,
+    val matchPersonUuid: String? = null,
+    val matchType: String? = null,
+    val rawPayload: String? = null,
+    val reason: String? = null,
+    val recaptureMessage: String? = null,
+    val replaceDate: String? = null,
+    val sourceId: String? = null
+)
+data class EMRArtPharmacy(
+    val id: Long,
+    val personUuid: String,
+    val visitDate: String,
+    val nextAppointment: String?,
+    val regimenId: Long?,
+    val mmdType: String?,
+    val refillPeriod: Int?,
+    val dsdModel: String?,
+    val adherence: Boolean?,
+    val lastModifiedDate: String,
+    // --- additional fields aligned with hiv_art_pharmacy server schema ---
+    val uuid: String? = null,
+    val visitId: String? = null,
+    val visitType: String? = null,
+    val createdDate: String? = null,
+    val createdBy: String? = null,
+    val lastModifiedBy: String? = null,
+    val facilityId: Long? = null,
+    val archived: Int? = null,
+    val deliveryPoint: String? = null,
+    val dsdModelType: String? = null,
+    val ipt: String? = null,
+    val iptType: String? = null,
+    val isDevolve: Boolean? = null,
+    val ardScreened: Boolean? = null,
+    val adverseDrugReactions: String? = null,
+    val prescriptionError: Boolean? = null,
+    val refill: String? = null,
+    val refillType: String? = null,
+    val source: String? = null,
+    val sourceId: Long? = null,
+    val rawPayload: String? = null,
+    val latitude: String? = null,
+    val longitude: String? = null,
+    val extra: String? = null
+)
 data class ApiResponse<T>(val success: Boolean, val data: T?=null, val message: String?=null, val errorCode: String?=null)
 data class HealthStatus(val status: String, val version: String, val timestamp: Long)
 data class SyncStatus(val lastSyncDate: String?, val pendingRecords: Int, val facilityVersion: String)

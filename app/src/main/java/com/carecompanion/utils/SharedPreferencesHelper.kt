@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKeys
 import com.carecompanion.CareCompanionApplication
 
 object SharedPreferencesHelper {
+    // ...existing code...
     private const val PREF_NAME = "care_companion_prefs"
     private const val TAG = "SharedPreferencesHelper"
 
@@ -75,14 +76,35 @@ object SharedPreferencesHelper {
     }
     fun getActiveFacilityId(context: Context): Long = prefs().getLong("facility_id", 0L)
     fun clearAll(context: Context) = prefs().edit().clear().apply()
-    fun getSyncPage(context: Context): Int = prefs().getInt("sync_page", 0)
-    fun setSyncPage(context: Context, page: Int) = prefs().edit().putInt("sync_page", page).apply()
+    // ── TX_ML pull filters (IIT/TRANSFER_OUT/DEATH) ───────────────────────
+    fun getSyncPage(context: Context): Int = prefs().getInt("sync_page_offset", 0)
+    fun setSyncPage(context: Context, page: Int) = prefs().edit().putInt("sync_page_offset", page).apply()
+    fun isTxMlIncludeEnabled(context: Context): Boolean = prefs().getBoolean("tx_ml_include_enabled", false)
+    fun setTxMlIncludeEnabled(enabled: Boolean) = prefs().edit().putBoolean("tx_ml_include_enabled", enabled).apply()
+    fun getTxMlStartDate(context: Context): String = prefs().getString("tx_ml_start_date", "") ?: ""
+    fun setTxMlStartDate(value: String) = prefs().edit().putString("tx_ml_start_date", value).apply()
+    fun getTxMlEndDate(context: Context): String = prefs().getString("tx_ml_end_date", "") ?: ""
+    fun setTxMlEndDate(value: String) = prefs().edit().putString("tx_ml_end_date", value).apply()
 
     // ── WINCO server (intermediate aggregation layer) ─────────────────────────
     /** Base URL of the WINCO server, e.g. "http://192.168.1.10:5000". */
-    fun setWincoBaseUrl(url: String) = prefs().edit().putString("winco_url", url).apply()
+    fun normalizeBaseUrl(rawUrl: String?): String? {
+        val raw = rawUrl?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val withScheme = if (raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true)) {
+            raw
+        } else {
+            "http://$raw"
+        }
+        return withScheme.trimEnd('/') + "/"
+    }
+
+    fun setWincoBaseUrl(url: String) {
+        val normalized = normalizeBaseUrl(url) ?: return
+        prefs().edit().putString("winco_url", normalized).apply()
+    }
+
     fun getWincoBaseUrl(context: Context): String? =
-        prefs().getString("winco_url", null) ?: prefs().getString("emr_url", null)
+        normalizeBaseUrl(prefs().getString("winco_url", null) ?: prefs().getString("emr_url", null))
 
     /** X-API-KEY header value required by WINCO's mobile endpoints. */
     fun setWincoApiKey(apiKey: String) = prefs().edit().putString("winco_api_key", apiKey).apply()

@@ -39,6 +39,7 @@ data class VerifyUiState(
 class VerifyViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val patientRepository: PatientRepository,
+    private val syncRepository: com.carecompanion.data.repository.SyncRepository,
     private val biometricManager: BiometricManager
 ) : ViewModel() {
 
@@ -127,31 +128,22 @@ class VerifyViewModel @Inject constructor(
     private suspend fun onFingerprintCaptured(template: ByteArray, selectedPatient: Patient, selectedFinger: FingerType) {
         _uiState.update { it.copy(step = VerifyStep.MATCHING) }
         try {
-            val patientFingerBiometrics = patientRepository.getBiometricsForPatient(selectedPatient.uuid)
-                .filter { matchesSelectedFinger(it, selectedFinger) }
-
-            if (patientFingerBiometrics.isEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        step = VerifyStep.ERROR,
-                        errorMessage = "No ${selectedFinger.displayName} biometric template found for ${selectedPatient.fullName ?: selectedPatient.hospitalNumber}."
-                    )
-                }
-                return
-            }
-
-            val match = findBestMatch(template, patientFingerBiometrics)
-            if (match != null) {
+            val matchResult = syncRepository.findPatientByBiometricForVerification(
+                template,
+                selectedPatient.uuid,
+                selectedFinger.name
+            )
+            if (matchResult != null && matchResult.patient != null && matchResult.template != null) {
                 _uiState.update {
                     it.copy(
                         step = VerifyStep.MATCHED,
-                        matchedPatient = MatchedPatient(selectedPatient, match.first, match.second.score),
-                        matchScore = match.second.score
+                        matchedPatient = MatchedPatient(matchResult.patient, matchResult.template, matchResult.confidence),
+                        matchScore = matchResult.confidence
                     )
                 }
                 return
             }
-            _uiState.update { it.copy(step = VerifyStep.NO_MATCH, matchScore = match?.second?.score ?: 0.0) }
+            _uiState.update { it.copy(step = VerifyStep.NO_MATCH, matchScore = matchResult?.confidence ?: 0.0) }
         } catch (e: Exception) {
             _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = e.message) }
         }

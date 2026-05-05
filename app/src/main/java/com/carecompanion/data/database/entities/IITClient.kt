@@ -26,6 +26,8 @@ data class IITClient(
     @ColumnInfo(name = "sex")             val sex: String?,
     @ColumnInfo(name = "dateOfBirth")     val dateOfBirth: Date?,
     @ColumnInfo(name = "facilityId")      val facilityId: Long,
+    @ColumnInfo(name = "currentStatus")   val currentStatus: String?,
+    @ColumnInfo(name = "currentStatusDate") val currentStatusDate: Date?,
     @ColumnInfo(name = "lastVisitDate")   val lastVisitDate: Date?,
     @ColumnInfo(name = "nextAppointment") val nextAppointment: Date?,
     @ColumnInfo(name = "dsdModel")        val dsdModel: String?,
@@ -38,6 +40,9 @@ data class IITClient(
                 .filter { it.isNotEmpty() }
                 .joinToString(", ")
                 .takeIf { it.isNotBlank() }
+            // hospitalNumber (PEPFAR unique_id) is always populated from WINCO — use it
+            // as the final fallback so the IIT list never shows a blank "Unknown" row.
+            ?: hospitalNumber.takeIf { it.isNotBlank() }
             ?: "Unknown"
 
     /** Initial letter for the avatar circle. */
@@ -45,43 +50,72 @@ data class IITClient(
         get() = (surname?.firstOrNull() ?: firstName?.firstOrNull() ?: '?').uppercaseChar()
 
     /**
-     * Days since the missed appointment (positive = overdue).
+     * Total days since the scheduled return date (nextAppointment).
+     * PEPFAR IIT threshold: ≥ 28 days. Patients are only in this list when
+     * nextAppointment + 28 days has already passed (enforced at SQL layer).
      * Returns 0 if nextAppointment is null.
      */
     val daysOverdue: Int
-        get() = nextAppointment?.let {
-            TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time).toInt().coerceAtLeast(0)
+        get() = nextAppointment?.let { appt ->
+            TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - appt.time).toInt().coerceAtLeast(0)
         } ?: 0
 
     /**
      * The exact date this client crossed into IIT status.
-     * = nextAppointment + 28 days.
+     * = nextAppointment + 28-day grace period (PEPFAR/NACA definition).
      */
     val iitEntryDate: Date?
-        get() = nextAppointment?.let { Date(it.time + TimeUnit.DAYS.toMillis(28)) }
+        get() = nextAppointment?.let { appt ->
+            Date(appt.time + TimeUnit.DAYS.toMillis(28))
+        }
 
-    /** Reporting period bucket this client falls into. */
-    fun iitPeriod(): IITPeriod = IITPeriod.of(iitEntryDate)
+    private fun isIitLikeStatus(): Boolean {
+        val status = currentStatus?.trim()?.uppercase()?.replace(" ", "_")?.replace("-", "_") ?: return false
+        return status in setOf(
+            "IIT",
+            "INTERRUPTED_IN_TREATMENT",
+            "LTFU",
+            "LOST_TO_FOLLOW_UP",
+            "TRANSFER_OUT",
+            "ART_TRANSFER_OUT",
+            "DEATH",
+            "DIED",
+            "DEAD",
+            "STOPPED_TREATMENT",
+            "TREATMENT_STOPPED",
+            "ART_STOP"
+        )
+    }
 
     /**
-     * PEPFAR IIT classification tier.
-     *   < 28 days  → should not appear in IIT list (filtered at query level)
-     *  28–59 days  → Early IIT
-     *  60–179 days → IIT
-     *  ≥ 180 days  → LTFU (Lost to Follow-Up)
+     * Prefer tracked status_date for period reporting when status is already IIT-like.
+     * Fall back to established pharmacy-derived IIT date otherwise.
+     */
+    val effectiveIitEntryDate: Date?
+        get() = if (isIitLikeStatus() && currentStatusDate != null) currentStatusDate else iitEntryDate
+
+    /** Reporting period bucket this client falls into. */
+    fun iitPeriod(): IITPeriod = IITPeriod.of(effectiveIitEntryDate)
+
+    /**
+     * PEPFAR TX_ML IIT classification tier (based on total days since nextAppointment).
+     *   < 28 days   → should not appear in IIT list (filtered at query level)
+     *  28–89 days   → IIT < 3 Months
+     *  90–179 days  → IIT 3–5 Months
+     *  ≥ 180 days   → IIT 6+ Months (LTFU)
      */
     val iitTier: IITTier
         get() = when {
             daysOverdue >= 180 -> IITTier.LTFU
-            daysOverdue >= 60  -> IITTier.IIT
+            daysOverdue >= 90  -> IITTier.IIT
             else               -> IITTier.EARLY_IIT
         }
 }
 
 enum class IITTier(val label: String, val shortLabel: String) {
-    EARLY_IIT("Early IIT",             "28–59d"),
-    IIT      ("IIT",                   "60–179d"),
-    LTFU     ("Lost to Follow-Up",     "180d+")
+    EARLY_IIT("IIT < 3 Months",      "28–89d"),
+    IIT      ("IIT 3–5 Months",      "90–179d"),
+    LTFU     ("IIT 6+ Months",       "180d+")
 }
 
 /**
@@ -94,7 +128,7 @@ enum class IITTier(val label: String, val shortLabel: String) {
 enum class IITPeriod(val label: String) {
     TODAY("Today"),
     THIS_WEEK("This Week"),
-    LAST_WEEK("Last IIT"),
+    LAST_WEEK("Last Week"),
     THIS_MONTH("This Month"),
     THIS_FY("This FY"),
     PREVIOUS("Previous");

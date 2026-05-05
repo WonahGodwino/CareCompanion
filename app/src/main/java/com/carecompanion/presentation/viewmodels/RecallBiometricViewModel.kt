@@ -35,6 +35,7 @@ data class RecallBiometricUiState(
 class RecallBiometricViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val patientRepository: PatientRepository,
+    private val syncRepository: com.carecompanion.data.repository.SyncRepository,
     private val biometricManager: BiometricManager
 ) : ViewModel() {
 
@@ -111,28 +112,18 @@ class RecallBiometricViewModel @Inject constructor(
     private suspend fun matchFingerprint(template: ByteArray) {
         _uiState.update { it.copy(step = RecallStep.MATCHING) }
         try {
-            val allBiometrics = patientRepository.getAllBiometrics()
-            var best: Pair<Biometric, Double>? = null
-            for (bio in allBiometrics) {
-                val result = biometricManager.match(template, bio.template)
-                if (result.isMatch && (best == null || result.score > best.second)) {
-                    best = Pair(bio, result.score)
+            val matchResult = syncRepository.findPatientByBiometric(template)
+            if (matchResult != null && matchResult.patient != null && matchResult.template != null) {
+                _uiState.update {
+                    it.copy(
+                        step = RecallStep.MATCHED,
+                        matchedPatient = MatchedPatient(matchResult.patient, matchResult.template, matchResult.confidence),
+                        matchScore = matchResult.confidence
+                    )
                 }
+                return
             }
-            if (best != null) {
-                val patient = patientRepository.getPatientByUuid(best.first.personUuid)
-                if (patient != null) {
-                    _uiState.update {
-                        it.copy(
-                            step = RecallStep.MATCHED,
-                            matchedPatient = MatchedPatient(patient, best.first, best.second),
-                            matchScore = best.second
-                        )
-                    }
-                    return
-                }
-            }
-            _uiState.update { it.copy(step = RecallStep.NO_MATCH, matchScore = best?.second ?: 0.0) }
+            _uiState.update { it.copy(step = RecallStep.NO_MATCH, matchScore = matchResult?.confidence ?: 0.0) }
         } catch (e: Exception) {
             _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = e.message) }
         }

@@ -2,6 +2,7 @@
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -10,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -81,9 +83,19 @@ fun SyncScreen(
                     if (!uiState.isSyncing)
                         Text("Last sync: ${uiState.lastSyncDate}", style = MaterialTheme.typography.bodySmall, color = syncContentColor)
 
-                    if (uiState.isSuccess == true)
-                        Text("Patients: ${uiState.patientsAdded} | Biometrics: ${uiState.biometricsAdded}",
-                            style = MaterialTheme.typography.bodySmall, color = syncContentColor)
+                    if (uiState.isSuccess == true) {
+                        Text(
+                            "Patients: ${uiState.patientsAdded} | Biometrics: ${uiState.biometricsAdded}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = syncContentColor
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Audit: pages ${uiState.pagesRead}, candidates ${uiState.biometricCandidates}, skipped ${uiState.biometricsSkipped}, failed ${uiState.biometricsFailed}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = syncContentColor
+                        )
+                    }
                 }
             }
 
@@ -128,6 +140,53 @@ fun SyncScreen(
                             )
                         }
                     }
+                }
+            }
+
+            HorizontalDivider()
+
+            Text("TX_ML Filters", fontWeight = FontWeight.Medium)
+            Text(
+                "Include IIT / TRANSFER_OUT / DEATH (TX_ML) clients within selected status-date range.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Include TX_ML clients")
+                Switch(
+                    checked = uiState.includeTxMl,
+                    onCheckedChange = viewModel::setIncludeTxMl
+                )
+            }
+
+            AnimatedVisibility(visible = uiState.includeTxMl) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = uiState.txMlStartDate,
+                        onValueChange = viewModel::setTxMlStartDate,
+                        label = { Text("TX_ML Start Date (yyyy-MM-dd)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    OutlinedTextField(
+                        value = uiState.txMlEndDate,
+                        onValueChange = viewModel::setTxMlEndDate,
+                        label = { Text("TX_ML End Date (yyyy-MM-dd)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    Text(
+                        "Only clients with hiv_status_tracker status in IIT/TRANSFER_OUT/DEATH and status_date inside this inclusive range will be added as TX_ML.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

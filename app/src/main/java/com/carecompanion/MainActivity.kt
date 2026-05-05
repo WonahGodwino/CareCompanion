@@ -24,6 +24,18 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+        override fun onResume() {
+            super.onResume()
+            // Check if crash log exists and notify user
+            val logFile = com.carecompanion.utils.CrashLogger.getLogFile(this)
+            if (logFile != null) {
+                Toast.makeText(
+                    this,
+                    "Crash log available: Documents/care_companion_crash_log.txt in your phone storage.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
         private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

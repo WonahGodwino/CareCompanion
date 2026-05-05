@@ -19,7 +19,7 @@ class PatientRepositoryImpl @Inject constructor(
     override suspend fun getAllActiveByFacility(facilityId: Long) = patientDao.getAllActiveByFacility(facilityId)
     override suspend fun searchPatients(query: String) = patientDao.searchPatients(query)
     override suspend fun searchPatientsByFacility(query: String, facilityId: Long) = patientDao.searchPatientsByFacility(query, facilityId)
-    override suspend fun getPatientByEmrId(emrId: Long) = patientDao.getByEmrPatientId(emrId)
+    override suspend fun getPatientByEmrId(emrId: Long) = patientDao.getByEmrId(emrId.toString())
     override suspend fun getPatientByUuid(uuid: String) = patientDao.getByUuid(uuid)
     override suspend fun getBiometricsForPatient(personUuid: String) = biometricDao.getByPersonUuid(personUuid)
     override suspend fun getAllBiometrics() = biometricDao.getAll()
@@ -33,8 +33,13 @@ class PatientRepositoryImpl @Inject constructor(
     override fun observeActiveCount() = patientDao.observeActiveCount()
     override fun observeActiveCountByFacility(facilityId: Long) = patientDao.observeActiveCountByFacility(facilityId)
     // IIT
-    override fun observeIITClients(cutoffDate: Date) = artPharmacyDao.observeIITClients(cutoffDate)
-    override fun observeIITClientsByFacility(cutoffDate: Date, facilityId: Long) = artPharmacyDao.observeIITClientsByFacility(cutoffDate, facilityId)
-    override fun observeIITSearch(q: String, cutoffDate: Date) = artPharmacyDao.observeIITSearch(q, cutoffDate)
-    override fun observeIITSearchByFacility(q: String, cutoffDate: Date, facilityId: Long) = artPharmacyDao.observeIITSearchByFacility(q, cutoffDate, facilityId)
+    override fun observeIITClients(todayMs: Long) = artPharmacyDao.observeIITClients(todayMs)
+    override fun observeIITClientsByFacility(todayMs: Long, facilityId: Long) = artPharmacyDao.observeIITClientsByFacility(todayMs, facilityId)
+    override fun observeIITSearch(q: String, todayMs: Long) = artPharmacyDao.observeIITSearch(q, todayMs)
+    override fun observeIITSearchByFacility(q: String, todayMs: Long, facilityId: Long) = artPharmacyDao.observeIITSearchByFacility(q, todayMs, facilityId)
+    // Missed Appointments
+    override fun observeMissedApptClients(todayMs: Long) = artPharmacyDao.observeMissedApptClients(todayMs)
+    override fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptClientsByFacility(todayMs, facilityId)
+    override fun observeMissedApptSearch(q: String, todayMs: Long) = artPharmacyDao.observeMissedApptSearch(q, todayMs)
+    override fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptSearchByFacility(q, todayMs, facilityId)
 }

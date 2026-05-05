@@ -10,8 +10,15 @@ interface PatientDao {
     // ── One-shot queries (used by sync / profile lookups) ──────────────────
     @Query("SELECT * FROM patient_person WHERE isActive = 1") suspend fun getAllActive(): List<Patient>
     @Query("SELECT * FROM patient_person WHERE isActive = 1 AND facilityId = :facilityId") suspend fun getAllActiveByFacility(facilityId: Long): List<Patient>
-    @Query("SELECT * FROM patient_person WHERE uuid = :uuid") suspend fun getByUuid(uuid: String): Patient?
-    @Query("SELECT * FROM patient_person WHERE emrPatientId = :emrId LIMIT 1") suspend fun getByEmrPatientId(emrId: Long): Patient?
+    @Query("SELECT * FROM patient_person WHERE uuid = :uuid")
+    suspend fun getByUuid(uuid: String): Patient?
+
+    // Added: lookup by emrId (string) and personUuid
+    @Query("SELECT * FROM patient_person WHERE emrId = :emrId LIMIT 1")
+    suspend fun getByEmrId(emrId: String?): Patient?
+
+    @Query("SELECT * FROM patient_person WHERE person_uuid = :personUuid LIMIT 1")
+    suspend fun getByPersonUuid(personUuid: String): Patient?
     @Query("SELECT * FROM patient_person WHERE hospitalNumber LIKE '%'||:q||'%' OR firstName LIKE '%'||:q||'%' OR surname LIKE '%'||:q||'%'")
     suspend fun searchPatients(q: String): List<Patient>
     @Query("SELECT * FROM patient_person WHERE (hospitalNumber LIKE '%'||:q||'%' OR firstName LIKE '%'||:q||'%' OR surname LIKE '%'||:q||'%') AND facilityId = :facilityId")

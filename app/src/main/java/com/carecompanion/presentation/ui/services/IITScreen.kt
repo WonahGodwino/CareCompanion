@@ -41,6 +41,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -130,6 +131,87 @@ private val shortMonFmt = SimpleDateFormat("MMM d", Locale.getDefault()).apply {
 private val fullMonFmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).apply { timeZone = watTimeZone }
 private val fullDateFmt = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).apply { timeZone = watTimeZone }
 
+private enum class PeriodCountMode(val label: String) {
+    EXCLUSIVE("Exclusive"),
+    CUMULATIVE("Cumulative")
+}
+
+private fun Calendar.clearTime() = apply {
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}
+
+private fun buildPeriodSummaryCounts(state: IITUiState, mode: PeriodCountMode): List<Pair<IITPeriod, Int>> {
+    if (mode == PeriodCountMode.EXCLUSIVE) {
+        return listOf(
+            IITPeriod.TODAY to state.todayCount,
+            IITPeriod.THIS_WEEK to state.thisWeekCount,
+            IITPeriod.LAST_WEEK to state.lastWeekCount,
+            IITPeriod.THIS_MONTH to state.thisMonthCount,
+            IITPeriod.THIS_FY to state.thisFYCount,
+            IITPeriod.PREVIOUS to state.previousCount,
+        )
+    }
+
+    val today = Calendar.getInstance(watTimeZone).clearTime()
+    val dow = today.get(Calendar.DAY_OF_WEEK)
+    val daysSinceMon = if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
+
+    val weekMon = (today.clone() as Calendar).also { it.add(Calendar.DAY_OF_YEAR, -daysSinceMon) }
+    val lastWeekMon = (weekMon.clone() as Calendar).also { it.add(Calendar.DAY_OF_YEAR, -7) }
+    val lastWeekSun = (weekMon.clone() as Calendar).also { it.add(Calendar.DAY_OF_YEAR, -1) }
+    val monthStart = (today.clone() as Calendar).also { it.set(Calendar.DAY_OF_MONTH, 1) }
+
+    val fyYear = if (today.get(Calendar.MONTH) >= Calendar.OCTOBER) {
+        today.get(Calendar.YEAR)
+    } else {
+        today.get(Calendar.YEAR) - 1
+    }
+    val fyStart = Calendar.getInstance(watTimeZone).clearTime().also {
+        it.set(fyYear, Calendar.OCTOBER, 1)
+    }
+
+    fun entryCal(client: IITClient): Calendar? = client.iitEntryDate?.let { entryDate ->
+        Calendar.getInstance(watTimeZone).also { it.time = entryDate }.clearTime()
+    }
+
+    val todayCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        entry.timeInMillis == today.timeInMillis
+    }
+    val thisWeekCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        !entry.before(weekMon) && !entry.after(today)
+    }
+    val lastWeekCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        !entry.before(lastWeekMon) && !entry.after(lastWeekSun)
+    }
+    val thisMonthCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        !entry.before(monthStart) && !entry.after(today)
+    }
+    val thisFYCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        !entry.before(fyStart) && !entry.after(today)
+    }
+    val previousCount = state.clients.count { client ->
+        val entry = entryCal(client) ?: return@count false
+        entry.before(fyStart)
+    }
+
+    return listOf(
+        IITPeriod.TODAY to todayCount,
+        IITPeriod.THIS_WEEK to thisWeekCount,
+        IITPeriod.LAST_WEEK to lastWeekCount,
+        IITPeriod.THIS_MONTH to thisMonthCount,
+        IITPeriod.THIS_FY to thisFYCount,
+        IITPeriod.PREVIOUS to previousCount,
+    )
+}
+
 private fun periodDateRange(period: IITPeriod): String {
     val today = Calendar.getInstance(watTimeZone)
     val dow = today.get(Calendar.DAY_OF_WEEK)
@@ -170,6 +252,7 @@ fun IITScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val showFab by remember { derivedStateOf { listState.firstVisibleItemIndex > 4 } }
+    val countMode = remember { androidx.compose.runtime.mutableStateOf(PeriodCountMode.EXCLUSIVE) }
 
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     fun isExpanded(p: IITPeriod) = expanded[p.name] ?: true
@@ -311,7 +394,7 @@ fun IITScreen(
                                     modifier = Modifier.size(18.dp).padding(top = 2.dp)
                                 )
                                 Text(
-                                    "IIT (Interruption in Treatment): clients on ART who have not returned for a scheduled refill for >= 28 consecutive days (PEPFAR/NACA definition). Clients are grouped by when they entered IIT status.",
+                                    "IIT (Interruption in Treatment): clients on ART who have not returned for a scheduled refill for \u2265 28 consecutive days past their next appointment date (PEPFAR TX_ML / NACA). Tiers: <3 months (28\u201389d), 3\u20135 months (90\u2013179d), 6+ months (180d+). Clients are grouped by when they entered IIT status.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF5D4037)
                                 )
@@ -319,7 +402,36 @@ fun IITScreen(
                         }
                     }
 
-                    item { IITPeriodSummaryRow(uiState) }
+                    item {
+                        Text(
+                            text = "Period breakdown uses IIT entry date (next appointment + 28 days) and exclusive buckets: Today, This Week, Last Week, This Month, This FY, Previous.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    item {
+                        PeriodCountModeRow(
+                            selectedMode = countMode.value,
+                            onModeSelected = { countMode.value = it }
+                        )
+                    }
+
+                    item { IITPeriodSummaryRow(uiState, countMode.value) }
+
+                    item {
+                        Text(
+                            text = if (countMode.value == PeriodCountMode.EXCLUSIVE) {
+                                "Exclusive view: each client appears in one reporting bucket only."
+                            } else {
+                                "Cumulative view: summary cards roll up period-to-date counts; section lists below remain exclusive buckets."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                        )
+                    }
 
                     if (uiState.searchQuery.isNotBlank()) {
                         item {
@@ -405,15 +517,34 @@ private fun IITEmptyPeriodRow(period: IITPeriod) {
 }
 
 @Composable
-private fun IITPeriodSummaryRow(state: IITUiState) {
-    val periodCounts = listOf(
-        IITPeriod.TODAY to state.todayCount,
-        IITPeriod.THIS_WEEK to state.thisWeekCount,
-        IITPeriod.LAST_WEEK to state.lastWeekCount,
-        IITPeriod.THIS_MONTH to state.thisMonthCount,
-        IITPeriod.THIS_FY to state.thisFYCount,
-        IITPeriod.PREVIOUS to state.previousCount
-    )
+private fun PeriodCountModeRow(
+    selectedMode: PeriodCountMode,
+    onModeSelected: (PeriodCountMode) -> Unit
+) {
+    Row(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Summary Mode",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold
+        )
+        PeriodCountMode.entries.forEach { mode ->
+            FilterChip(
+                selected = selectedMode == mode,
+                onClick = { onModeSelected(mode) },
+                label = { Text(mode.label) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun IITPeriodSummaryRow(state: IITUiState, mode: PeriodCountMode) {
+    val periodCounts = buildPeriodSummaryCounts(state, mode)
 
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),

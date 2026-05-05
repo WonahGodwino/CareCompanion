@@ -98,9 +98,11 @@ class SettingsViewModel @Inject constructor(
         if (state.emrUrl.isBlank()) { _uiState.update { it.copy(errorMessage = "WINCO Server URL is required") }; return }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val raw = state.emrUrl.trim()
-            val normalized = if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "http://$raw"
-            val baseUrl = normalized.trimEnd('/') + "/"
+            val baseUrl = SharedPreferencesHelper.normalizeBaseUrl(state.emrUrl)
+            if (baseUrl == null) {
+                _uiState.update { it.copy(isLoading = false, errorMessage = "WINCO Server URL is required") }
+                return@launch
+            }
             SharedPreferencesHelper.setWincoBaseUrl(baseUrl)
             if (state.scannerType.isNotBlank()) SharedPreferencesHelper.setScannerType(context, state.scannerType)
             _uiState.update { it.copy(isLoading = false, isSaved = true, emrUrl = baseUrl) }
@@ -115,9 +117,8 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isReAuthLoading = true, reAuthSuccess = false) }
             try {
-                val raw = state.emrUrl.trim()
-                val normalized = if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "http://$raw"
-                val baseUrl = normalized.trimEnd('/') + "/"
+                val baseUrl = SharedPreferencesHelper.normalizeBaseUrl(state.emrUrl)
+                    ?: throw Exception("WINCO Server URL is required")
 
                 // Build a plain (unauthenticated) client — no Bearer header interceptor.
                 // The token endpoint itself does not require authentication.
@@ -197,6 +198,7 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isReAuthLoading = false, reAuthSuccess = true,
+                        emrUrl = baseUrl,
                         facilities = facilities, needsFacilitySelection = needsPicker,
                         activeFacilityId = newActiveFacilityId, activeFacilityName = newActiveFacilityName
                     )

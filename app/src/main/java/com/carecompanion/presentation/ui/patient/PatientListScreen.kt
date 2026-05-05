@@ -257,6 +257,31 @@ private fun PatientListItem(patient: Patient, onClick: () -> Unit) {
     val initial = (patient.firstName?.firstOrNull()
         ?: patient.fullName?.firstOrNull()
         ?: '?').toString().uppercase()
+    val normalizedStatus = patient.currentStatus
+        ?.trim()
+        ?.uppercase()
+        ?.replace(" ", "_")
+        ?.replace("-", "_")
+    val (statusChipContainer, statusChipText) = when (normalizedStatus) {
+        "ACTIVE", "ACTIVE_TX_CURR" -> Color(0xFFE8F5E9) to Color(0xFF1B5E20)
+        "IIT" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+        "TRANSFER_OUT" -> Color(0xFFE3F2FD) to Color(0xFF0D47A1)
+        "STOPPED_TREATMENT", "DEATH", "DECEASED" -> Color(0xFFFFEBEE) to Color(0xFFB71C1C)
+        "UNKNOWN_STATUS" -> Color(0xFFF5F5F5) to Color(0xFF616161)
+        else -> Color(0xFFF3E5F5) to Color(0xFF4A148C)
+    }
+    val statusLabel = when (normalizedStatus) {
+        "ACTIVE", "ACTIVE_TX_CURR" -> "Active"
+        "IIT" -> "IIT"
+        "TRANSFER_OUT" -> "Transfer Out"
+        "STOPPED_TREATMENT" -> "Stopped Treatment"
+        "DEATH", "DECEASED" -> "Dead"
+        "UNKNOWN_STATUS", null -> "Unknown"
+        else -> normalizedStatus
+            .lowercase()
+            .split('_')
+            .joinToString(" ") { token -> token.replaceFirstChar { it.uppercase() } }
+    }
 
     Card(
         modifier  = Modifier
@@ -340,6 +365,32 @@ private fun PatientListItem(patient: Patient, onClick: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = MaterialTheme.shapes.extraSmall,
+                        color = statusChipContainer
+                    ) {
+                        Text(
+                            text = "Status: $statusLabel",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusChipText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    patient.currentStatusDate?.let { statusDate ->
+                        Text(
+                            text = DateUtils.formatDate(statusDate),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 

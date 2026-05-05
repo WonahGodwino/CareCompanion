@@ -24,4 +24,13 @@
 
 # Keep our own scanner wrapper classes so Hilt can inject them
 -keep class com.carecompanion.biometric.** { *; }
-# ────────────────────────────────────────────────────────────────────────────
+
+# Ignore warnings for missing AlcorLink camera classes (auto-generated)
+-dontwarn com.alcorlink.camera.AKAVImage
+-dontwarn com.alcorlink.camera.AKPU
+-dontwarn com.alcorlink.camera.AKXUS
+-dontwarn com.alcorlink.camera.AlCameraDevice
+-dontwarn com.alcorlink.camera.AlDevManager
+-dontwarn com.alcorlink.camera.AlFrame
+-dontwarn com.alcorlink.camera.CameraException
+-dontwarn com.alcorlink.camera.StreamConfig

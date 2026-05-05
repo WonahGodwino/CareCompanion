@@ -29,6 +29,14 @@ class CareCompanionApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Set up global uncaught exception handler
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                com.carecompanion.utils.CrashLogger.logException(this, throwable)
+            } catch (_: Exception) {}
+            // Optionally, call the default handler to let the app crash as normal
+            Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(thread, throwable)
+        }
         createNotificationChannels()
         biometricManager.initialize(applicationContext)
         if (!SharedPreferencesHelper.isFirstLaunch(this)) {

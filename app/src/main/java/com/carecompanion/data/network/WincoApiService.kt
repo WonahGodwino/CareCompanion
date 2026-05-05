@@ -1,8 +1,10 @@
 package com.carecompanion.data.network
 
-import com.carecompanion.data.network.models.PatientBiometricResponse
+import com.carecompanion.data.network.models.WincoBiometricResponse
+import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoClientPage
 import com.carecompanion.data.network.models.WincoFacility
+import com.carecompanion.data.network.models.WincoSummary
 import com.carecompanion.data.network.models.WincoTokenRequest
 import com.carecompanion.data.network.models.WincoTokenResponse
 import retrofit2.http.Body
@@ -26,18 +28,47 @@ interface WincoApiService {
     /**
      * Returns a paginated list of ART clients from WINCO.
      *
-     * Pass [txCurrOnly]=true to restrict results to TX_CURR-eligible clients
-     * (latest status ART_START | ART_TRANSFER_IN with active pharmacy record).
+        * Default scope: all enrolled non-archived ART clients.
+     * Pass [txCurrOnly]=true to restrict to TX_CURR-eligible clients only
+     * (legacy switch — server still honours it for backward compatibility).
+        *
+        * TX_ML options:
+        * - includeTxMl=true enables IIT/TRANSFER_OUT/DEATH inclusion.
+        * - txMlStartDate / txMlEndDate constrain those TX_ML statuses by
+        *   hiv_status_tracker.status_date (inclusive, yyyy-MM-dd).
      *
      * WINCO endpoint: GET /api/art/clients
      */
     @GET("api/art/clients")
     suspend fun getTxCurrClients(
-        @Query("facility_id") facilityId: Long?,
-        @Query("page")        page: Int = 1,
-        @Query("per_page")    perPage: Int = 100,
-        @Query("tx_curr_only") txCurrOnly: Boolean = true,
+        @Query("facility_id")      facilityId: Long?,
+        @Query("page")             page: Int = 1,
+        @Query("per_page")         perPage: Int = 100,
+        @Query("tx_curr_only")     txCurrOnly: Boolean = false,
+        @Query("apply_care_filter") applyCareFilter: Boolean = false,
+        @Query("care_categories")  careCategories: String? = null,
+        @Query("q")                search: String? = null,
+        @Query("as_of_date")       asOfDate: String? = null,
+        @Query("include_tx_ml")    includeTxMl: Boolean = false,
+        @Query("tx_ml_start_date") txMlStartDate: String? = null,
+        @Query("tx_ml_end_date")   txMlEndDate: String? = null,
+        @Query("include_archived") includeArchived: Boolean = false,
     ): WincoClientPage
+
+    /**
+     * Single ART client detail — enrollment, clinical visits, pharmacy visits,
+     * status history and a biometric summary (no template bytes).
+     *
+     * Returns HTTP 404 if no enrollment record exists for the given person_uuid.
+     * Available for all care categories (ACTIVE, IIT, TRANSFER_OUT, DEATH, etc.).
+     *
+     * WINCO endpoint: GET /api/art/clients/{person_uuid}
+     */
+    @GET("api/art/clients/{person_uuid}")
+    suspend fun getClientDetail(
+        @Path("person_uuid") personUuid: String,
+        @Query("as_of_date") asOfDate: String? = null,
+    ): WincoClientDetail
 
     /**
      * Biometric templates for a single client.
@@ -55,7 +86,7 @@ interface WincoApiService {
     @GET("api/art/biometrics/{person_uuid}/templates")
     suspend fun getBiometricTemplates(
         @Path("person_uuid") personUuid: String,
-    ): PatientBiometricResponse
+    ): WincoBiometricResponse
 
     /**
      * Obtain a Bearer token from WINCO by presenting WINCO username + password.
@@ -75,4 +106,16 @@ interface WincoApiService {
      */
     @GET("api/art/facilities")
     suspend fun getFacilities(): List<WincoFacility>
+
+    /**
+     * Home-screen KPI summary for a single facility.
+     * Returns TX_CURR, IIT-this-week, biometric coverage, and last-sync timestamp.
+     *
+     * WINCO endpoint: GET /api/art/summary
+     */
+    @GET("api/art/summary")
+    suspend fun getDashboardSummary(
+        @Query("facility_id") facilityId: Long? = null,
+        @Query("as_of_date")  asOfDate: String? = null,
+    ): WincoSummary
 }

@@ -47,20 +47,21 @@ private fun serviceModules() = listOf(
         available     = true,
         route         = Screen.IIT.route
     ),
-    // ── COMING SOON ───────────────────────────────────────────────────────────
+    ServiceModule(
+        title         = "Missed Appointments",
+        description   = "Clients who did not return on their scheduled appointment date. Includes High Priority Tracking for clients 3 to 1 days before IIT (25–27d missed).",
+        icon          = Icons.Default.EventBusy,
+        accentColor   = Color(0xFFE65100),
+        onAccentColor = Color(0xFFFFF3E0),
+        available     = true,
+        route         = Screen.MissedAppt.route
+    ),    // ── COMING SOON ───────────────────────────────────────────────────────────
     ServiceModule(
         title         = "ART Refills",
         description   = "Track upcoming and overdue antiretroviral therapy refill due dates for active clients.",
         icon          = Icons.Default.Medication,
         accentColor   = Color(0xFF01579B),
         onAccentColor = Color(0xFFE3F2FD),
-    ),
-    ServiceModule(
-        title         = "Missed Appointments",
-        description   = "Identify clients who missed scheduled clinic appointments and require follow-up.",
-        icon          = Icons.Default.EventBusy,
-        accentColor   = Color(0xFFE65100),
-        onAccentColor = Color(0xFFFFF3E0),
     ),
     ServiceModule(
         title         = "Viral Load",

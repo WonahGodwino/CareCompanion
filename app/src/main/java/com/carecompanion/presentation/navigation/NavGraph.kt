@@ -14,6 +14,7 @@ import com.carecompanion.presentation.ui.settings.SettingsScreen
 import com.carecompanion.presentation.ui.patient.PatientScreen
 import com.carecompanion.presentation.ui.patient.PatientListScreen
 import com.carecompanion.presentation.ui.services.IITScreen
+import com.carecompanion.presentation.ui.services.MissedApptScreen
 import com.carecompanion.presentation.ui.services.ServicesScreen
 import com.carecompanion.presentation.viewmodels.SharedViewModel
 sealed class Screen(val route: String) {
@@ -24,6 +25,7 @@ sealed class Screen(val route: String) {
     object PatientList:Screen("patient_list")
     object Services:Screen("services")
     object IIT:Screen("iit")
+    object MissedAppt:Screen("missed_appt")
     object PatientProfile:Screen("patient/{patientId}") { fun createRoute(id:String)="patient/$id" }
 }
 @Composable
@@ -38,6 +40,7 @@ fun AppNavHost(navController: NavHostController=rememberNavController(), sharedV
         composable(Screen.PatientList.route)    { PatientListScreen(navController,sharedViewModel) }
         composable(Screen.Services.route)       { ServicesScreen(navController) }
         composable(Screen.IIT.route)            { IITScreen(navController) }
+        composable(Screen.MissedAppt.route)     { MissedApptScreen(navController) }
         composable(Screen.PatientProfile.route) { back ->
             val id = back.arguments?.getString("patientId") ?: return@composable
             PatientScreen(navController,id,sharedViewModel)

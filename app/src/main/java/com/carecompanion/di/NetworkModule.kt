@@ -3,6 +3,7 @@
 import android.content.Context
 import com.carecompanion.data.network.EMRApiService
 import com.carecompanion.data.network.WincoApiService
+import com.carecompanion.data.network.WincoAuthenticator
 import com.carecompanion.utils.SharedPreferencesHelper
 import dagger.Module
 import dagger.Provides
@@ -86,8 +87,13 @@ object NetworkModule {
     @Provides
     @Singleton
     @WincoService
-    fun provideWincoOkHttpClient(@ApplicationContext context: Context): OkHttpClient =
+    fun provideWincoOkHttpClient(
+        @ApplicationContext context: Context,
+        wincoAuthenticator: WincoAuthenticator,
+    ): OkHttpClient =
         OkHttpClient.Builder()
+            // Silently refreshes the 7-day Bearer token on HTTP 401 responses.
+            .authenticator(wincoAuthenticator)
             .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
             // Dynamically rewrite host/scheme/port from the saved WINCO URL on every request
             .addInterceptor { chain ->

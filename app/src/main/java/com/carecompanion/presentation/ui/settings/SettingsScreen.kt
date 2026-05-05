@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -72,6 +73,52 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ── Crash Log ─────────────────────────────────────────
+            val context = LocalContext.current
+            val crashLogFile = remember { com.carecompanion.utils.CrashLogger.getLogFile(context) }
+            var showCrashLogDialog by remember { mutableStateOf(false) }
+            if (crashLogFile != null) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Crash Log Available", fontWeight = FontWeight.SemiBold)
+                        Text("A crash log was found at Documents/care_companion_crash_log.txt. You can share it for support or clear it.", style = MaterialTheme.typography.bodySmall)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    context.packageName + ".provider",
+                                    crashLogFile
+                                )
+                                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Crash Log"))
+                            }) {
+                                Icon(Icons.Default.Share, null); Spacer(Modifier.width(4.dp)); Text("Share Log")
+                            }
+                            OutlinedButton(onClick = { showCrashLogDialog = true }) {
+                                Icon(Icons.Default.Delete, null); Spacer(Modifier.width(4.dp)); Text("Clear Log")
+                            }
+                        }
+                    }
+                }
+            }
+            if (showCrashLogDialog) {
+                AlertDialog(
+                    onDismissRequest = { showCrashLogDialog = false },
+                    title = { Text("Clear Crash Log?") },
+                    text = { Text("Are you sure you want to delete the crash log file? This cannot be undone.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            crashLogFile?.delete()
+                            showCrashLogDialog = false
+                        }) { Text("Delete") }
+                    },
+                    dismissButton = { TextButton(onClick = { showCrashLogDialog = false }) { Text("Cancel") } }
+                )
+            }
 
             // ── WINCO Server ────────────────────────────────────────
             Text("WINCO Server", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
