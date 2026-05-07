@@ -75,6 +75,7 @@ import androidx.navigation.NavController
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.IITPeriod
 import com.carecompanion.data.database.entities.IITTier
+import com.carecompanion.presentation.navigation.Screen
 import com.carecompanion.presentation.viewmodels.IITUiState
 import com.carecompanion.presentation.viewmodels.IITViewModel
 import com.carecompanion.utils.DateUtils
@@ -475,6 +476,9 @@ fun IITScreen(
                                     IITClientRow(
                                         client = client,
                                         alternate = index % 2 == 1,
+                                        onClick = {
+                                            navController.navigate(Screen.PatientProfile.createRoute(client.uuid))
+                                        },
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                                     )
                                 }
@@ -723,7 +727,12 @@ private fun IITEmptyState(searchQuery: String) {
 }
 
 @Composable
-private fun IITClientRow(client: IITClient, alternate: Boolean = false, modifier: Modifier = Modifier) {
+private fun IITClientRow(
+    client: IITClient,
+    alternate: Boolean = false,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val bg = tierBg(client.iitTier)
     val fg = tierFg(client.iitTier)
     val av = avatarBg(client.iitTier)
@@ -731,7 +740,9 @@ private fun IITClientRow(client: IITClient, alternate: Boolean = false, modifier
                 else MaterialTheme.colorScheme.surface
 
     ElevatedCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = rowBg)

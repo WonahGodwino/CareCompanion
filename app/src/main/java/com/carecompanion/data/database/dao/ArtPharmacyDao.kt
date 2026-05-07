@@ -314,4 +314,139 @@ interface ArtPharmacyDao {
     fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long): Flow<List<IITClient>>
 
     @Query("DELETE FROM art_pharmacy") suspend fun deleteAll()
+
+    // ── ART Refill queries ─────────────────────────────────────────────────────
+    // Returns ALL active ART patients with their latest pharmacy record (no overdue
+    // filter). Eligibility grouping is computed in the ViewModel using
+    // ServiceEligibilityEngine — this query simply provides the raw data.
+
+    @Query("""
+        SELECT
+            p.uuid          AS patientId,
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.facilityId,
+            p.currentStatus,
+            p.currentStatusDate,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.dsdModel,
+            ap.refillPeriod
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap
+            ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND ap.visitDate = (
+              SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
+          )
+        GROUP BY p.uuid
+        ORDER BY ap.visitDate DESC
+    """)
+    fun observeArtRefillClients(): Flow<List<IITClient>>
+
+    @Query("""
+        SELECT
+            p.uuid          AS patientId,
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.facilityId,
+            p.currentStatus,
+            p.currentStatusDate,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.dsdModel,
+            ap.refillPeriod
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap
+            ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND p.facilityId = :facilityId
+          AND ap.visitDate = (
+              SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
+          )
+        GROUP BY p.uuid
+        ORDER BY ap.visitDate DESC
+    """)
+    fun observeArtRefillClientsByFacility(facilityId: Long): Flow<List<IITClient>>
+
+    @Query("""
+        SELECT
+            p.uuid          AS patientId,
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.facilityId,
+            p.currentStatus,
+            p.currentStatusDate,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.dsdModel,
+            ap.refillPeriod
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap
+            ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND ap.visitDate = (
+              SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
+          )
+          AND (
+              p.hospitalNumber LIKE '%' || :q || '%'
+              OR p.firstName   LIKE '%' || :q || '%'
+              OR p.surname     LIKE '%' || :q || '%'
+              OR p.fullName    LIKE '%' || :q || '%'
+          )
+        GROUP BY p.uuid
+        ORDER BY ap.visitDate DESC
+    """)
+    fun observeArtRefillSearch(q: String): Flow<List<IITClient>>
+
+    @Query("""
+        SELECT
+            p.uuid          AS patientId,
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.facilityId,
+            p.currentStatus,
+            p.currentStatusDate,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.dsdModel,
+            ap.refillPeriod
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap
+            ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND p.facilityId = :facilityId
+          AND ap.visitDate = (
+              SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
+          )
+          AND (
+              p.hospitalNumber LIKE '%' || :q || '%'
+              OR p.firstName   LIKE '%' || :q || '%'
+              OR p.surname     LIKE '%' || :q || '%'
+              OR p.fullName    LIKE '%' || :q || '%'
+          )
+        GROUP BY p.uuid
+        ORDER BY ap.visitDate DESC
+    """)
+    fun observeArtRefillSearchByFacility(q: String, facilityId: Long): Flow<List<IITClient>>
 }

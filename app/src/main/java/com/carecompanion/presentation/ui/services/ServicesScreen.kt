@@ -58,17 +58,21 @@ private fun serviceModules() = listOf(
     ),    // ── COMING SOON ───────────────────────────────────────────────────────────
     ServiceModule(
         title         = "ART Refills",
-        description   = "Track upcoming and overdue antiretroviral therapy refill due dates for active clients.",
+        description   = "Track upcoming and overdue antiretroviral therapy refill due dates for active clients. Grouped by eligibility: Due, Not Yet Due, IIT, and inactive categories.",
         icon          = Icons.Default.Medication,
         accentColor   = Color(0xFF01579B),
         onAccentColor = Color(0xFFE3F2FD),
+        available     = true,
+        route         = Screen.ArtRefill.route
     ),
     ServiceModule(
         title         = "Viral Load",
-        description   = "Monitor viral load suppression status and flag clients due for VL sample collection.",
+        description   = "Monitor viral load suppression status and flag clients due for VL sample collection. Baseline (6 months post-ART start) and routine (12 months adults / 6 months children).",
         icon          = Icons.Default.Biotech,
         accentColor   = Color(0xFF6A1B9A),
         onAccentColor = Color(0xFFF3E5F5),
+        available     = true,
+        route         = Screen.ViralLoad.route
     ),
     ServiceModule(
         title         = "TPT",

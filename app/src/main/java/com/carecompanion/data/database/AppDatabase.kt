@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class],version=10,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class],version=14,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -18,6 +18,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun artPharmacyDao(): ArtPharmacyDao
     abstract fun syncLogDao(): SyncLogDao
     abstract fun facilityDao(): FacilityDao
+    abstract fun viralLoadHistoryDao(): ViralLoadHistoryDao
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
@@ -95,10 +96,63 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Store ART initiation date for offline VL baseline eligibility calculation.
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `artStartDate` INTEGER DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add viral load and TB screening fields from WINCO EMR sync for offline eligibility calculation.
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `lastViralLoadDate` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `lastViralLoadResult` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `lastViralLoadResultRaw` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `lastTbScreeningDate` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `lastTbScreeningStatus` TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `viral_load_history` (
+                        `personUuid` TEXT NOT NULL,
+                        `testId` INTEGER NOT NULL,
+                        `sampleTypeId` INTEGER,
+                        `sampleNumber` TEXT,
+                        `resultRaw` TEXT,
+                        `resultNumeric` INTEGER,
+                        `resultDate` INTEGER,
+                        `assayedDate` INTEGER,
+                        `sampleDate` INTEGER,
+                        `sourceId` INTEGER,
+                        `source` TEXT,
+                        `lastSyncDate` INTEGER NOT NULL,
+                        PRIMARY KEY(`personUuid`, `testId`),
+                        FOREIGN KEY(`personUuid`) REFERENCES `patient_person`(`uuid`) ON UPDATE CASCADE ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_viral_load_history_personUuid` ON `viral_load_history` (`personUuid`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_viral_load_history_resultDate` ON `viral_load_history` (`resultDate`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_viral_load_history_sampleDate` ON `viral_load_history` (`sampleDate`)")
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Persist NDR match outcome used by biometric recapture eligibility rules.
+                db.execSQL("ALTER TABLE `patient_person` ADD COLUMN `ndrMatchedStatus` TEXT DEFAULT NULL")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

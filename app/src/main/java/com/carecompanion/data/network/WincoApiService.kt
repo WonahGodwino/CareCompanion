@@ -71,6 +71,15 @@ interface WincoApiService {
     ): WincoClientDetail
 
     /**
+     * Optional dedicated endpoint for full viral load history.
+     * Primary sync path uses getClientDetail() which now includes viral_load_history.
+     */
+    @GET("api/art/clients/{person_uuid}/viral-load-history")
+    suspend fun getClientViralLoadHistory(
+        @Path("person_uuid") personUuid: String,
+    ): Map<String, @JvmSuppressWildcards Any?>
+
+    /**
      * Biometric templates for a single client.
      *
      * WINCO reads template bytes from its own local mirror of the EMR

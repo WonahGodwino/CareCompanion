@@ -8,14 +8,17 @@ import com.carecompanion.data.database.dao.ArtPharmacyDao
 import com.carecompanion.data.database.dao.BiometricDao
 import com.carecompanion.data.database.dao.PatientDao
 import com.carecompanion.data.database.dao.SyncLogDao
+import com.carecompanion.data.database.dao.ViralLoadHistoryDao
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.data.database.entities.SyncLog
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import com.carecompanion.data.network.WincoApiService
 import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoClientItem
 import com.carecompanion.data.network.models.WincoPharmacyVisit
+import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
 import com.carecompanion.utils.DateUtils
 import com.carecompanion.utils.NetworkUtils
 import com.carecompanion.utils.SharedPreferencesHelper
@@ -37,7 +40,8 @@ class SyncRepositoryImpl @Inject constructor(
     private val patientDao: PatientDao,
     private val biometricDao: BiometricDao,
     private val artPharmacyDao: ArtPharmacyDao,
-    private val syncLogDao: SyncLogDao
+    private val syncLogDao: SyncLogDao,
+    private val viralLoadHistoryDao: ViralLoadHistoryDao,
 ) : SyncRepository {
 
     override suspend fun findPatientByBiometric(
@@ -148,6 +152,7 @@ class SyncRepositoryImpl @Inject constructor(
         // Keep a small pacing delay only to avoid overwhelming slower servers.
         private const val BIOMETRIC_REQUEST_DELAY_MS = 50L
         private const val BIOMETRIC_PARALLELISM = 4
+        private const val DETAIL_PARALLELISM = 4
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_MS = 1000L
         private const val MIN_TEMPLATE_BYTES = 128
@@ -241,12 +246,40 @@ class SyncRepositoryImpl @Inject constructor(
                     .filter { it.isEnrollmentEligibleForPull(detailCache) }
                     .filter { seenPersonUuids.add(it.personUuid) }
                 val enrichedPagePatients = eligiblePagePatients.map { it.withDemographyFromPatientTableIfNeeded(detailCache) }
-                val patients = enrichedPagePatients.map { it.toPatient(defaultFacilityId = facilityId ?: 0L) }
-                
+
+                ensureClientDetails(enrichedPagePatients.map { it.personUuid }, detailCache)
+
+                val patients = enrichedPagePatients.map { item ->
+                    val detail = detailCache[item.personUuid]
+                    item.toPatient(
+                        defaultFacilityId = facilityId ?: 0L,
+                        lastViralLoadDate = detail?.viralLoad?.lastResultDate,
+                        lastViralLoadResult = detail?.viralLoad?.lastResultValue,
+                        lastViralLoadResultRaw = detail?.viralLoad?.rawResult,
+                        ndrMatchedStatus = detail?.ndrMatch?.matchOutcome,
+                        lastTbScreeningDate = detail?.tbScreening?.date,
+                        lastTbScreeningStatus = detail?.tbScreening?.status,
+                    )
+                }
+
+                val pageViralLoadHistory = enrichedPagePatients.flatMap { item ->
+                    (detailCache[item.personUuid]?.viralLoadHistory ?: emptyList())
+                        .mapNotNull { it.toViralLoadHistory(item.personUuid) }
+                }
+
                 val pharmacySnapshots = enrichedPagePatients.mapNotNull { it.toLatestArtPharmacy() }
                 // Room withTransaction must be called from a suspend context; this is already a suspend function
                 // so we can safely call suspend DAO methods directly
                 patientDao.insertAll(patients)
+
+                val pagePersonUuids = enrichedPagePatients.map { it.personUuid }.distinct()
+                pagePersonUuids.forEach { personUuid ->
+                    viralLoadHistoryDao.deleteByPersonUuid(personUuid)
+                }
+                if (pageViralLoadHistory.isNotEmpty()) {
+                    viralLoadHistoryDao.insertAll(pageViralLoadHistory)
+                }
+
                 if (pharmacySnapshots.isNotEmpty()) {
                     artPharmacyDao.insertAll(pharmacySnapshots)
                     pharmacyAdded += pharmacySnapshots.size
@@ -651,7 +684,15 @@ class SyncRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun WincoClientItem.toPatient(defaultFacilityId: Long): Patient {
+    private fun WincoClientItem.toPatient(
+        defaultFacilityId: Long,
+        lastViralLoadDate: String? = null,
+        lastViralLoadResult: Long? = null,
+        lastViralLoadResultRaw: String? = null,
+        ndrMatchedStatus: String? = null,
+        lastTbScreeningDate: String? = null,
+        lastTbScreeningStatus: String? = null,
+    ): Patient {
         val effectiveStatus = careCategory?.takeIf { it.isNotBlank() } ?: latestHivStatus
         val effectiveFullName = patientName?.takeIf { it.isNotBlank() }
             ?: listOfNotNull(firstName, middleName, lastName)
@@ -699,6 +740,13 @@ class SyncRepositoryImpl @Inject constructor(
             source = "WINCO",
             currentStatus = effectiveStatus,
             currentStatusDate = DateUtils.parseDate(latestHivStatusDate),
+            artStartDate = DateUtils.parseDate(dateOfRegistration),
+            lastViralLoadDate = DateUtils.parseDate(lastViralLoadDate),
+            lastViralLoadResult = lastViralLoadResult,
+            lastViralLoadResultRaw = lastViralLoadResultRaw,
+            ndrMatchedStatus = ndrMatchedStatus,
+            lastTbScreeningDate = DateUtils.parseDate(lastTbScreeningDate),
+            lastTbScreeningStatus = lastTbScreeningStatus,
             facilityId = facilityId ?: defaultFacilityId,
             lastSyncDate = Date(),
             isActive = isActivePatient
@@ -760,6 +808,48 @@ class SyncRepositoryImpl @Inject constructor(
 
         val enrollment = detail?.enrollment
         return detail?.isArtClient == true && enrollment != null && (enrollment.archived ?: 0) == 0
+    }
+
+    private suspend fun ensureClientDetails(
+        personUuids: List<String>,
+        detailCache: MutableMap<String, WincoClientDetail?>,
+    ) {
+        val missing = personUuids.distinct().filter { !detailCache.containsKey(it) }
+        if (missing.isEmpty()) return
+
+        for (chunk in missing.chunked(DETAIL_PARALLELISM)) {
+            coroutineScope {
+                chunk.map { personUuid ->
+                    async {
+                        val detail = try {
+                            retryWithBackoff { wincoApiService.getClientDetail(personUuid) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to prefetch client detail for $personUuid", e)
+                            null
+                        }
+                        detailCache[personUuid] = detail
+                    }
+                }.awaitAll()
+            }
+        }
+    }
+
+    private fun WincoViralLoadHistoryItem.toViralLoadHistory(personUuid: String): ViralLoadHistory? {
+        val resolvedTestId = testId ?: return null
+        return ViralLoadHistory(
+            personUuid = personUuid,
+            testId = resolvedTestId,
+            sampleTypeId = sampleTypeId,
+            sampleNumber = sampleNumber,
+            resultRaw = resultRaw,
+            resultNumeric = resultNumeric,
+            resultDate = DateUtils.parseDate(dateResultReported),
+            assayedDate = DateUtils.parseDate(dateAssayed),
+            sampleDate = DateUtils.parseDate(dateSampleCollected),
+            sourceId = sourceId,
+            source = source,
+            lastSyncDate = Date(),
+        )
     }
 
     private fun sha256Hex(data: ByteArray): String {

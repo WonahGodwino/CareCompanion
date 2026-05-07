@@ -4,6 +4,7 @@ import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.Patient
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
@@ -17,6 +18,7 @@ interface PatientRepository {
     suspend fun getBiometricsForPatient(personUuid: String): List<Biometric>
     suspend fun getAllBiometrics(): List<Biometric>
     suspend fun getArtPharmacyForPatient(personUuid: String): List<ArtPharmacy>
+    suspend fun getViralLoadHistoryForPatient(personUuid: String): List<ViralLoadHistory>
     suspend fun getPatientCount(): Int
     suspend fun getBiometricCount(): Int
     // Reactive flows — Room emits a new list whenever the table changes
@@ -36,4 +38,14 @@ interface PatientRepository {
     fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long): Flow<List<IITClient>>
     fun observeMissedApptSearch(q: String, todayMs: Long): Flow<List<IITClient>>
     fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long): Flow<List<IITClient>>
+    // ART Refill — all active ART patients with latest pharmacy record (grouping done in ViewModel)
+    fun observeArtRefillClients(): Flow<List<IITClient>>
+    fun observeArtRefillClientsByFacility(facilityId: Long): Flow<List<IITClient>>
+    fun observeArtRefillSearch(q: String): Flow<List<IITClient>>
+    fun observeArtRefillSearchByFacility(q: String, facilityId: Long): Flow<List<IITClient>>
+    // Viral Load — all active patients (VL fields are on Patient entity)
+    fun observeAllActivePatientsFlow(): Flow<List<Patient>>
+    fun observeAllActivePatientsByFacilityFlow(facilityId: Long): Flow<List<Patient>>
+    fun observePatientSearch(q: String): Flow<List<Patient>>
+    fun observePatientSearchByFacility(q: String, facilityId: Long): Flow<List<Patient>>
 }

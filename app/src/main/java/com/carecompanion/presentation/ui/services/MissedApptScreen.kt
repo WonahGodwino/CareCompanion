@@ -29,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.IITPeriod
+import com.carecompanion.presentation.navigation.Screen
 import com.carecompanion.presentation.viewmodels.MissedApptTier
 import com.carecompanion.presentation.viewmodels.MissedApptUiState
 import com.carecompanion.presentation.viewmodels.MissedApptViewModel
@@ -279,6 +280,9 @@ fun MissedApptScreen(
                                     MissedApptClientRow(
                                         client = client,
                                         alternate = index % 2 == 1,
+                                        onClick = {
+                                            navController.navigate(Screen.PatientProfile.createRoute(client.uuid))
+                                        },
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                                     )
                                 }
@@ -397,6 +401,7 @@ private fun MissedPeriodHeader(
 private fun MissedApptClientRow(
     client: IITClient,
     alternate: Boolean = false,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val tier  = client.missedApptTier()
@@ -409,7 +414,9 @@ private fun MissedApptClientRow(
                 else MaterialTheme.colorScheme.surface
 
     ElevatedCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.elevatedCardElevation(3.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = rowBg)

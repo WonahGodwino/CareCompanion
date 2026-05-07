@@ -142,6 +142,69 @@ data class WincoPatientDetail(
     @SerializedName("facility_id")     val facilityId: Long?,
 )
 
+data class WincoServiceEligibility(
+    @SerializedName("service")      val service: String,          // e.g. "ART_REFILL", "MISSED_APPOINTMENT", etc.
+    @SerializedName("eligible")     val eligible: Boolean,
+    @SerializedName("reason")       val reason: String?,
+    @SerializedName("urgency")      val urgency: String?,         // "critical", "high", "due", "routine"
+    @SerializedName("next_action")  val nextAction: String?,
+    // Service-specific fields
+    @SerializedName("last_refill_date")              val lastRefillDate: String? = null,
+    @SerializedName("medication_expiry_date")       val medicationExpiryDate: String? = null,
+    @SerializedName("days_until_expiry")            val daysUntilExpiry: Int? = null,
+    @SerializedName("appointment_type")             val appointmentType: String? = null,
+    @SerializedName("scheduled_date")               val scheduledDate: String? = null,
+    @SerializedName("days_overdue")                 val daysOverdue: Int? = null,
+    @SerializedName("vl_type")                      val vlType: String? = null,  // "baseline" or "routine"
+    @SerializedName("months_on_art")                val monthsOnArt: Int? = null,
+    @SerializedName("months_since_last_vl")        val monthsSinceLastVl: Int? = null,
+    @SerializedName("cd4_count")                    val cd4Count: Int? = null,
+    @SerializedName("tb_status")                    val tbStatus: String? = null,
+    @SerializedName("priority")                     val priority: String? = null,
+    @SerializedName("contraindications")            val contraindications: List<String> = emptyList(),
+)
+
+data class WincoServiceEligibilitySummary(
+    @SerializedName("as_of_date")           val asOfDate: String?,
+    @SerializedName("services")             val services: Map<String, WincoServiceEligibility> = emptyMap(),
+    @SerializedName("eligible_services")    val eligibleServices: List<String> = emptyList(),
+    @SerializedName("summary")              val summary: Map<String, Int> = emptyMap(),
+)
+
+data class WincoViralLoadSummary(
+    @SerializedName(value = "result_numeric", alternate = ["last_result_value"]) val lastResultValue: Long? = null,
+    @SerializedName(value = "date_result_reported", alternate = ["last_result_date"]) val lastResultDate: String? = null,
+    @SerializedName("test_type")            val testType: String? = null,
+    @SerializedName(value = "result_raw", alternate = ["raw_result"]) val rawResult: String? = null,
+)
+
+data class WincoViralLoadHistoryItem(
+    @SerializedName("test_id")              val testId: Long? = null,
+    @SerializedName("sample_type_id")       val sampleTypeId: Int? = null,
+    @SerializedName("sample_number")        val sampleNumber: String? = null,
+    @SerializedName("result_raw")           val resultRaw: String? = null,
+    @SerializedName("result_numeric")       val resultNumeric: Long? = null,
+    @SerializedName("date_result_reported") val dateResultReported: String? = null,
+    @SerializedName("date_assayed")         val dateAssayed: String? = null,
+    @SerializedName("date_sample_collected") val dateSampleCollected: String? = null,
+    @SerializedName("source_id")            val sourceId: Long? = null,
+    @SerializedName("source")               val source: String? = null,
+)
+
+data class WincoTbScreeningSummary(
+    @SerializedName("status")               val status: String? = null,
+    @SerializedName("date")                 val date: String? = null,
+    @SerializedName("note")                 val note: String? = null,
+)
+
+data class WincoNdrMatch(
+    @SerializedName("facility_name")     val facilityName: String? = null,
+    @SerializedName("datim_code")        val datimCode: String? = null,
+    @SerializedName("patient_art_number") val patientArtNumber: String? = null,
+    @SerializedName("person_uuid")       val personUuid: String? = null,
+    @SerializedName("match_outcome")     val matchOutcome: String? = null,
+)
+
 data class WincoClientDetail(
     @SerializedName("person_uuid")      val personUuid: String,
     @SerializedName("unique_id")        val uniqueId: String?,
@@ -154,6 +217,11 @@ data class WincoClientDetail(
     @SerializedName("pharmacy_visits")  val pharmacyVisits: List<WincoPharmacyVisit> = emptyList(),
     @SerializedName("status_history")   val statusHistory: List<WincoStatusHistoryItem> = emptyList(),
     @SerializedName("biometric")        val biometric: WincoBiometricSummary?,
+    @SerializedName("service_eligibility") val serviceEligibility: WincoServiceEligibilitySummary? = null,
+    @SerializedName("viral_load")       val viralLoad: WincoViralLoadSummary? = null,
+    @SerializedName("viral_load_history") val viralLoadHistory: List<WincoViralLoadHistoryItem> = emptyList(),
+    @SerializedName("tb_screening")     val tbScreening: WincoTbScreeningSummary? = null,
+    @SerializedName("ndr_match")        val ndrMatch: WincoNdrMatch? = null,
 )
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,13 @@ data class Patient(
     val source: String? = null,
     val currentStatus: String? = null, // "ART", "PrEP", "HTS", "HIVST", etc. 
     val currentStatusDate: Date? = null,
+    val artStartDate: Date? = null,      // ART initiation date (date_started from enrollment)
+    val lastViralLoadDate: Date? = null,        // From WINCO viral_load.last_result_date
+    val lastViralLoadResult: Long? = null,      // From WINCO viral_load.last_result_value (numeric)
+    val lastViralLoadResultRaw: String? = null, // Raw string like "Not Detected", ">=200"
+    val ndrMatchedStatus: String? = null,       // From WINCO NDR line list match_outcome / NDR_Matched_status
+    val lastTbScreeningDate: Date? = null,      // From WINCO tb_screening.date
+    val lastTbScreeningStatus: String? = null,  // From WINCO tb_screening.status
     val facilityId: Long,
     val lastSyncDate: Date,
     val isActive: Boolean = true

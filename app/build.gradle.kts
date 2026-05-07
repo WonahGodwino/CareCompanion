@@ -18,7 +18,7 @@ android {
     compileSdk = 34
     defaultConfig {
         applicationId = "com.carecompanion"
-        minSdk = 24; targetSdk = 34; versionCode = 2; versionName = "1.0.1"
+        minSdk = 24; targetSdk = 34; versionCode = 3; versionName = "1.0.2"
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // SecuGen FDx SDK Pro ships arm64-v8a, armeabi-v7a, x86, x86_64 .so files

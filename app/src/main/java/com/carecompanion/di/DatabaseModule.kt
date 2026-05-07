@@ -19,7 +19,16 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "care_companion_db")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10,
+                AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13,
+            )
             .fallbackToDestructiveMigration()
             .build()
 
@@ -28,4 +37,5 @@ object DatabaseModule {
     @Provides fun provideArtPharmacyDao(db: AppDatabase): ArtPharmacyDao = db.artPharmacyDao()
     @Provides fun provideSyncLogDao(db: AppDatabase): SyncLogDao = db.syncLogDao()
     @Provides fun provideFacilityDao(db: AppDatabase): FacilityDao = db.facilityDao()
+    @Provides fun provideViralLoadHistoryDao(db: AppDatabase): ViralLoadHistoryDao = db.viralLoadHistoryDao()
 }

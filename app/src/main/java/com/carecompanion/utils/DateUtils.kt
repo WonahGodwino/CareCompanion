@@ -11,14 +11,21 @@ object DateUtils {
     private val timeFormat = SimpleDateFormat("hh:mm a, dd MMM yyyy", Locale.getDefault()).apply { timeZone = watTimeZone }
     fun parseDate(dateString: String?): Date? {
         if (dateString.isNullOrBlank()) return null
-        return try {
-            when {
-                dateString.contains("T") -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(dateString)
-                else -> SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateString)
-            }
-        } catch (e: Exception) {
-            null
+        val formats = when {
+            dateString.contains("T") -> listOf(
+                "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.SSS"
+            )
+            else -> listOf("yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy")
         }
+        for (fmt in formats) {
+            try {
+                return SimpleDateFormat(fmt, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(dateString)
+            } catch (_: Exception) {}
+        }
+        return null
     }
 
     fun formatIso8601(date: Date): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(date)
