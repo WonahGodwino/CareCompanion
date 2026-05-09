@@ -3,12 +3,14 @@
 import com.carecompanion.data.database.dao.ArtPharmacyDao
 import com.carecompanion.data.database.dao.BiometricDao
 import com.carecompanion.data.database.dao.PatientDao
-import com.carecompanion.data.database.dao.ViralLoadHistoryDao
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.Patient
-import com.carecompanion.data.database.entities.ViralLoadHistory
+import com.carecompanion.data.network.WincoApiService
+import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Date
 import javax.inject.Inject
 
@@ -16,7 +18,7 @@ class PatientRepositoryImpl @Inject constructor(
     private val patientDao: PatientDao,
     private val biometricDao: BiometricDao,
     private val artPharmacyDao: ArtPharmacyDao,
-    private val viralLoadHistoryDao: ViralLoadHistoryDao,
+    private val wincoApiService: WincoApiService
 ) : PatientRepository {
     override suspend fun getAllActivePatients() = patientDao.getAllActive()
     override suspend fun getAllActiveByFacility(facilityId: Long) = patientDao.getAllActiveByFacility(facilityId)
@@ -27,8 +29,6 @@ class PatientRepositoryImpl @Inject constructor(
     override suspend fun getBiometricsForPatient(personUuid: String) = biometricDao.getByPersonUuid(personUuid)
     override suspend fun getAllBiometrics() = biometricDao.getAll()
     override suspend fun getArtPharmacyForPatient(personUuid: String) = artPharmacyDao.getByPersonUuid(personUuid)
-    override suspend fun getViralLoadHistoryForPatient(personUuid: String): List<ViralLoadHistory> =
-        viralLoadHistoryDao.getByPersonUuid(personUuid)
     override suspend fun getPatientCount() = patientDao.getActiveCount()
     override suspend fun getBiometricCount() = biometricDao.getCount()
     override fun observeAllActive() = patientDao.observeAllActive()
@@ -47,14 +47,12 @@ class PatientRepositoryImpl @Inject constructor(
     override fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptClientsByFacility(todayMs, facilityId)
     override fun observeMissedApptSearch(q: String, todayMs: Long) = artPharmacyDao.observeMissedApptSearch(q, todayMs)
     override fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptSearchByFacility(q, todayMs, facilityId)
-    // ART Refill
-    override fun observeArtRefillClients() = artPharmacyDao.observeArtRefillClients()
-    override fun observeArtRefillClientsByFacility(facilityId: Long) = artPharmacyDao.observeArtRefillClientsByFacility(facilityId)
-    override fun observeArtRefillSearch(q: String) = artPharmacyDao.observeArtRefillSearch(q)
-    override fun observeArtRefillSearchByFacility(q: String, facilityId: Long) = artPharmacyDao.observeArtRefillSearchByFacility(q, facilityId)
-    // Viral Load (reuse patient observers)
-    override fun observeAllActivePatientsFlow() = patientDao.observeAllActive()
-    override fun observeAllActivePatientsByFacilityFlow(facilityId: Long) = patientDao.observeAllActiveByFacility(facilityId)
-    override fun observePatientSearch(q: String) = patientDao.observeSearch(q)
-    override fun observePatientSearchByFacility(q: String, facilityId: Long) = patientDao.observeSearchByFacility(q, facilityId)
+
+    override suspend fun getViralLoadHistory(personUuid: String): List<WincoViralLoadHistoryItem> = withContext(Dispatchers.IO) {
+        runCatching {
+            wincoApiService.getViralLoadHistory(personUuid).items
+        }.getOrElse {
+            emptyList()
+        }
+    }
 }

@@ -738,7 +738,7 @@ class SyncRepositoryImpl @Inject constructor(
             fullName = effectiveFullName,
             sex = gender,
             dateOfBirth = DateUtils.parseDate(dateOfBirth),
-            dateOfRegistration = DateUtils.parseDate(dateOfRegistration),
+            dateOfRegistration = DateUtils.parseDate(dateOfRegistration) ?: DateUtils.parseDate(dateStarted),
             archived = archived ?: 0,
             isDateOfBirthEstimated = false,
             ninNumber = null,

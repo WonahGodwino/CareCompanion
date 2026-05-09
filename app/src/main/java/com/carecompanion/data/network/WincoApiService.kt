@@ -7,6 +7,7 @@ import com.carecompanion.data.network.models.WincoFacility
 import com.carecompanion.data.network.models.WincoSummary
 import com.carecompanion.data.network.models.WincoTokenRequest
 import com.carecompanion.data.network.models.WincoTokenResponse
+import com.carecompanion.data.network.models.WincoViralLoadHistoryResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -127,4 +128,9 @@ interface WincoApiService {
         @Query("facility_id") facilityId: Long? = null,
         @Query("as_of_date")  asOfDate: String? = null,
     ): WincoSummary
+
+    @GET("api/art/clients/{person_uuid}/viral-load-history")
+    suspend fun getViralLoadHistory(
+        @Path("person_uuid") personUuid: String,
+    ): WincoViralLoadHistoryResponse
 }

@@ -292,3 +292,24 @@ data class WincoSummary(
     @SerializedName("last_sync_at")                 val lastSyncAt: String? = null,
     @SerializedName("facility_id")                  val facilityId: Long? = null,
 )
+
+data class WincoViralLoadHistoryItem(
+    @SerializedName("sample_source_id") val sampleSourceId: Long?,
+    @SerializedName("test_id") val testId: String?,
+    @SerializedName("sample_type_id") val sampleTypeId: Int?,
+    @SerializedName("sample_number") val sampleNumber: String?,
+    @SerializedName("result_raw") val resultRaw: String?,
+    @SerializedName("result_numeric") val resultNumeric: Double?,
+    @SerializedName("date_result_reported") val dateResultReported: String?,
+    @SerializedName("date_assayed") val dateAssayed: String?,
+    @SerializedName("date_sample_collected") val dateSampleCollected: String?,
+    @SerializedName("source_id") val sourceId: Long?,
+    @SerializedName("result_pending") val resultPending: Boolean = false,
+    @SerializedName("source") val source: String?,
+)
+
+data class WincoViralLoadHistoryResponse(
+    @SerializedName("person_uuid") val personUuid: String,
+    @SerializedName("count") val count: Int = 0,
+    @SerializedName("items") val items: List<WincoViralLoadHistoryItem> = emptyList(),
+)

@@ -6,24 +6,31 @@ import java.util.concurrent.TimeUnit
 
 object DateUtils {
     private val watTimeZone: TimeZone = TimeZone.getTimeZone("Africa/Lagos")
-    private val inputFormats = listOf("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'","yyyy-MM-dd'T'HH:mm:ss'Z'","yyyy-MM-dd HH:mm:ss","yyyy-MM-dd","dd/MM/yyyy","MM/dd/yyyy")
+    private val inputFormats = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd",
+        "dd/MM/yyyy",
+        "MM/dd/yyyy"
+    )
     private val outputFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).apply { timeZone = watTimeZone }
     private val timeFormat = SimpleDateFormat("hh:mm a, dd MMM yyyy", Locale.getDefault()).apply { timeZone = watTimeZone }
     fun parseDate(dateString: String?): Date? {
         if (dateString.isNullOrBlank()) return null
-        val formats = when {
-            dateString.contains("T") -> listOf(
-                "yyyy-MM-dd'T'HH:mm:ss'Z'",
-                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-                "yyyy-MM-dd'T'HH:mm:ss",
-                "yyyy-MM-dd'T'HH:mm:ss.SSS"
-            )
-            else -> listOf("yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy")
-        }
-        for (fmt in formats) {
-            try {
-                return SimpleDateFormat(fmt, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(dateString)
-            } catch (_: Exception) {}
+        for (pattern in inputFormats) {
+            val parser = SimpleDateFormat(pattern, Locale.US).apply {
+                isLenient = true
+                if (pattern.contains("'Z'") || pattern.contains("XXX")) {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+            }
+            val parsed = runCatching { parser.parse(dateString) }.getOrNull()
+            if (parsed != null) {
+                return parsed
+            }
         }
         return null
     }
