@@ -201,6 +201,7 @@ class SyncRepositoryImpl @Inject constructor(
         return try {
             var patientsAdded = 0
             var biometricsAdded = 0
+            var viralLoadAdded = 0
             var pharmacyAdded = 0
             var invalidBiometricsSkipped = 0
             var totalBiometricSkipped = 0
@@ -270,28 +271,12 @@ class SyncRepositoryImpl @Inject constructor(
                     )
                 }
 
-                val pageViralLoadHistory = enrichedPagePatients.flatMap { item ->
-                    (detailCache[item.personUuid]?.viralLoadHistory ?: emptyList())
-                        .mapNotNull { it.toViralLoadHistory(item.personUuid) }
-                }
-
-                val pharmacySnapshots = enrichedPagePatients.mapNotNull { it.toLatestArtPharmacy() }
                 val pagePersonUuids = enrichedPagePatients.map { it.personUuid }.distinct()
 
                 // Wrap all page writes in a single transaction — eliminates per-insert
                 // journal flushes and gives a 3–5× speedup on DB-write latency.
                 db.withTransaction {
                     patientDao.insertAll(patients)
-                    pagePersonUuids.forEach { uuid -> viralLoadHistoryDao.deleteByPersonUuid(uuid) }
-                    if (pageViralLoadHistory.isNotEmpty()) {
-                        viralLoadHistoryDao.insertAll(pageViralLoadHistory)
-                    }
-                    if (pharmacySnapshots.isNotEmpty()) {
-                        artPharmacyDao.insertAll(pharmacySnapshots)
-                    }
-                }
-                if (pharmacySnapshots.isNotEmpty()) {
-                    pharmacyAdded += pharmacySnapshots.size
                 }
                 patientEntities.addAll(patients)
 
@@ -523,18 +508,10 @@ class SyncRepositoryImpl @Inject constructor(
                         totalBiometricSkipped += skippedCount
                         totalBiometricFailed += failedCount
 
-                        val pharmacyRecords = detail?.pharmacyVisits
-                            ?.mapNotNull { it.toArtPharmacy(personUuid) }
-                            ?: emptyList()
-
                         if (biometrics.isNotEmpty()) {
                             biometricDao.insertAll(biometrics)
                             biometricsAdded += biometrics.size
                             Log.d(TAG, "Saved ${biometrics.size} biometrics for ${patient.uuid}")
-                        }
-                        if (pharmacyRecords.isNotEmpty()) {
-                            artPharmacyDao.insertAll(pharmacyRecords)
-                            pharmacyAdded += pharmacyRecords.size
                         }
 
                         consecutiveServerErrors = 0
@@ -546,6 +523,64 @@ class SyncRepositoryImpl @Inject constructor(
                 onProgress?.invoke("No biometric candidates found")
             }
 
+            if (patientEntities.isNotEmpty()) {
+                onProgress?.invoke("Phase 3: Syncing Viral Load history for ${patientEntities.size} clients...")
+                for (chunk in patientEntities.chunked(DETAIL_PARALLELISM)) {
+                    val outcomes = coroutineScope {
+                        chunk.map { patient ->
+                            async {
+                                try {
+                                    val resp = retryWithBackoff { wincoApiService.getViralLoadHistory(patient.uuid) }
+                                    Pair(patient.uuid, resp.items.mapNotNull { it.toViralLoadHistory(patient.uuid) })
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to fetch VL history for ${patient.uuid}", e)
+                                    null
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                    val validOutcomes = outcomes.filterNotNull()
+                    db.withTransaction {
+                        validOutcomes.forEach { (uuid, history) ->
+                            viralLoadHistoryDao.deleteByPersonUuid(uuid)
+                            if (history.isNotEmpty()) {
+                                viralLoadHistoryDao.insertAll(history)
+                            }
+                        }
+                    }
+                    viralLoadAdded += validOutcomes.sumOf { it.second.size }
+                    onProgress?.invoke("Phase 3: Viral Load history... $viralLoadAdded records")
+                }
+
+                onProgress?.invoke("Phase 4: Syncing ART Pharmacy history for ${patientEntities.size} clients...")
+                for (chunk in patientEntities.chunked(DETAIL_PARALLELISM)) {
+                    val outcomes = coroutineScope {
+                        chunk.map { patient ->
+                            async {
+                                try {
+                                    val resp = retryWithBackoff { wincoApiService.getPharmacyHistory(patient.uuid) }
+                                    Pair(patient.uuid, resp.items.mapNotNull { it.toArtPharmacy(patient.uuid) })
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to fetch pharmacy history for ${patient.uuid}", e)
+                                    null
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                    val validOutcomes = outcomes.filterNotNull()
+                    db.withTransaction {
+                        validOutcomes.forEach { (uuid, history) ->
+                            artPharmacyDao.deleteByPersonUuid(uuid)
+                            if (history.isNotEmpty()) {
+                                artPharmacyDao.insertAll(history)
+                            }
+                        }
+                    }
+                    pharmacyAdded += validOutcomes.sumOf { it.second.size }
+                    onProgress?.invoke("Phase 4: Pharmacy history... $pharmacyAdded records")
+                }
+            }
+
             val now = DateUtils.formatIso8601(Date())
             SharedPreferencesHelper.setLastSyncDate(context, now)
             syncLogDao.insert(SyncLog(
@@ -555,7 +590,7 @@ class SyncRepositoryImpl @Inject constructor(
                 status = "SUCCESS"
             ))
             
-            onProgress?.invoke("Sync complete: $patientsAdded patients, $biometricsAdded biometrics, $pharmacyAdded pharmacy records")
+            onProgress?.invoke("Sync complete: $patientsAdded patients, $biometricsAdded biometrics, $viralLoadAdded VL history, $pharmacyAdded pharmacy history")
             onProgress?.invoke("Skipped $invalidBiometricsSkipped invalid/low-quality templates")
 
             val biometricBatchSize = biometricCandidates.distinctBy { it.first }.size
@@ -566,9 +601,17 @@ class SyncRepositoryImpl @Inject constructor(
                 biometricsSaved = biometricsAdded,
                 biometricsSkipped = totalBiometricSkipped,
                 biometricsFailed = totalBiometricFailed,
+                viralLoadHistorySaved = viralLoadAdded,
+                pharmacyHistorySaved = pharmacyAdded,
             )
 
-            SyncResult.Success(patientsAdded, biometricsAdded, audit)
+            SyncResult.Success(
+                patientsAdded = patientsAdded,
+                biometricsAdded = biometricsAdded,
+                viralLoadHistoryAdded = viralLoadAdded,
+                pharmacyHistoryAdded = pharmacyAdded,
+                audit = audit
+            )
             
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)

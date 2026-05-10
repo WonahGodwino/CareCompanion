@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.Patient
-import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import com.carecompanion.data.repository.PatientRepository
 import com.carecompanion.biometric.models.FingerType
 import com.carecompanion.utils.DateUtils
@@ -113,11 +113,11 @@ class PatientProfileViewModel @Inject constructor(
         }
     }
 
-    private fun WincoViralLoadHistoryItem.toUiItem(): ViralLoadHistoryUiItem? {
-        val sampleDate = DateUtils.parseDate(dateSampleCollected)
-        val resultDate = DateUtils.parseDate(dateResultReported) ?: DateUtils.parseDate(dateAssayed)
-        val resultValue = resultNumeric
-        val pending = resultPending || resultRaw.isNullOrBlank()
+    private fun ViralLoadHistory.toUiItem(): ViralLoadHistoryUiItem? {
+        val sampleDate = this.sampleDate
+        val resultDate = this.resultDate ?: this.assayedDate
+        val resultValue = this.resultNumeric?.toDouble()
+        val pending = this.resultRaw.isNullOrBlank()
         val valueLabel = when {
             pending -> "Pending"
             resultValue != null -> resultValue.toInt().toString()
@@ -136,10 +136,10 @@ class PatientProfileViewModel @Inject constructor(
             else -> status
         }
         return ViralLoadHistoryUiItem(
-            sampleSourceId = sampleSourceId ?: sourceId,
-            testId = testId ?: (sampleSourceId ?: sourceId)?.toString().orEmpty(),
-            sampleNumber = sampleNumber,
-            sampleTypeId = sampleTypeId,
+            sampleSourceId = this.sourceId,
+            testId = this.testId.toString(),
+            sampleNumber = this.sampleNumber,
+            sampleTypeId = this.sampleTypeId,
             dateSampleCollected = sampleDate,
             dateResultReported = resultDate,
             resultRaw = resultRaw,
@@ -156,11 +156,23 @@ class PatientProfileViewModel @Inject constructor(
         patient: Patient?,
         history: List<ViralLoadHistoryUiItem>
     ): ViralLoadCurrentUiState {
-        if (patient == null || history.isEmpty()) return ViralLoadCurrentUiState()
+        if (patient == null) return ViralLoadCurrentUiState()
 
-        val latest = history.first()
-        val pending = latest.isPending
-        val latestViralLoadDate = latest.dateResultReported ?: latest.dateSampleCollected
+        val latest = history.firstOrNull()
+        val pending = latest?.isPending ?: false
+
+        // Use history if available, otherwise fallback to summary fields in Patient entity
+        val latestViralLoadDate = latest?.let { it.dateResultReported ?: it.dateSampleCollected }
+            ?: patient.lastViralLoadDate
+
+        val resultNumeric = latest?.resultNumeric ?: patient.lastViralLoadResult?.toDouble()
+        val resultRaw = latest?.resultRaw ?: patient.lastViralLoadResultRaw
+
+        // If no history and no summary data, return empty state
+        if (latest == null && latestViralLoadDate == null && resultNumeric == null && resultRaw == null) {
+            return ViralLoadCurrentUiState()
+        }
+
         val eligibility = if (!pending) {
             ViralLoadEligibilityEngine.evaluate(
                 dateOfBirth = patient.dateOfBirth,
@@ -170,30 +182,33 @@ class PatientProfileViewModel @Inject constructor(
         } else null
 
         val statusLabel = when {
-            pending && latest.isOverdueNoResult -> "Overdue sample with no Result"
+            pending && (latest?.isOverdueNoResult == true) -> "Overdue sample with no Result"
             pending -> "Viral Load Sample Collection"
             else -> "Current Viral Load"
         }
+
         val resultLabel = when {
             pending -> "Result Pending"
-            latest.resultNumeric != null && latest.resultNumeric <= 20 -> "Undetected"
-            latest.resultNumeric != null && latest.resultNumeric < 1000 -> "Suppressed"
-            latest.resultNumeric != null -> "Unsuppressed"
-            else -> latest.resultRaw ?: "N/A"
+            resultNumeric != null && resultNumeric <= 20 -> "Undetected"
+            resultNumeric != null && resultNumeric < 1000 -> "Suppressed"
+            resultNumeric != null -> "Unsuppressed"
+            else -> resultRaw ?: "N/A"
         }
+
         val resultValueLabel = when {
             pending -> "Pending"
-            latest.resultNumeric != null -> latest.resultNumeric.toInt().toString()
-            else -> latest.resultRaw ?: "N/A"
+            resultNumeric != null -> resultNumeric.toInt().toString()
+            else -> resultRaw ?: "N/A"
         }
+
         val dateLabel = when {
-            pending -> latest.dateSampleCollected?.let { "Date Sample Collected: ${DateUtils.formatDate(it)}" } ?: "Date Sample Collected: N/A"
-            latest.dateResultReported != null -> "Viral Load Date: ${DateUtils.formatDate(latest.dateResultReported)}"
-            latest.dateSampleCollected != null -> "Viral Load Date: ${DateUtils.formatDate(latest.dateSampleCollected)}"
+            pending -> latest?.dateSampleCollected?.let { "Date Sample Collected: ${DateUtils.formatDate(it)}" } ?: "Date Sample Collected: N/A"
+            latestViralLoadDate != null -> "Viral Load Date: ${DateUtils.formatDate(latestViralLoadDate)}"
             else -> "Viral Load Date: N/A"
         }
+
         val nextDueLabel = when {
-            pending -> if (latest.isOverdueNoResult) "Next Due Date: Review immediately" else "Next Due Date: Pending result"
+            pending -> if (latest?.isOverdueNoResult == true) "Next Due Date: Review immediately" else "Next Due Date: Pending result"
             eligibility != null -> "Next Due Date: ${DateUtils.formatDate(eligibility.dueDate)}"
             else -> "Next Due Date: N/A"
         }
@@ -204,7 +219,7 @@ class PatientProfileViewModel @Inject constructor(
             resultValueLabel = resultValueLabel,
             dateLabel = dateLabel,
             nextDueLabel = nextDueLabel,
-            flagLabel = latest.resultFlag,
+            flagLabel = latest?.resultFlag,
             dueType = eligibility?.dueType,
             eligibility = eligibility,
         )

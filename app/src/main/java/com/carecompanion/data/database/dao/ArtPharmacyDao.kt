@@ -15,6 +15,7 @@ interface ArtPharmacyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insert(artPharmacy: ArtPharmacy)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(artPharmacies: List<ArtPharmacy>)
     @Query("SELECT COUNT(*) FROM art_pharmacy") suspend fun getCount(): Int
+    @Query("DELETE FROM art_pharmacy WHERE personUuid = :personUuid") suspend fun deleteByPersonUuid(personUuid: String)
 
     // ── IIT (Interruption in Treatment) queries ───────────────────────────────
     // Definition: patient whose expected return date (nextAppointment + refillPeriod) has passed.

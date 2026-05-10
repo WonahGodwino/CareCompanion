@@ -7,12 +7,16 @@ data class SyncAudit(
     val biometricsSaved: Int = 0,
     val biometricsSkipped: Int = 0,
     val biometricsFailed: Int = 0,
+    val viralLoadHistorySaved: Int = 0,
+    val pharmacyHistorySaved: Int = 0,
 )
 
 sealed class SyncResult {
     data class Success(
         val patientsAdded: Int,
         val biometricsAdded: Int,
+        val viralLoadHistoryAdded: Int = 0,
+        val pharmacyHistoryAdded: Int = 0,
         val audit: SyncAudit = SyncAudit(),
     ) : SyncResult()
     data class Error(val message: String) : SyncResult()

@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.carecompanion.data.database.entities.Patient
-import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import com.carecompanion.data.repository.PatientRepository
 import com.carecompanion.utils.SharedPreferencesHelper
 import com.carecompanion.utils.DateUtils
@@ -50,7 +50,7 @@ class ViralLoadViewModel @Inject constructor(
     private val patientRepository: PatientRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
-    private val viralLoadHistoryCache = mutableMapOf<String, List<WincoViralLoadHistoryItem>>()
+    private val viralLoadHistoryCache = mutableMapOf<String, List<ViralLoadHistory>>()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -85,21 +85,19 @@ class ViralLoadViewModel @Inject constructor(
                             .asSequence()
                             .filter { it.sampleTypeId == 5 }
                             .sortedByDescending {
-                                DateUtils.parseDate(it.dateResultReported)?.time
-                                    ?: DateUtils.parseDate(it.dateAssayed)?.time
-                                    ?: DateUtils.parseDate(it.dateSampleCollected)?.time
+                                it.resultDate?.time
+                                    ?: it.assayedDate?.time
+                                    ?: it.sampleDate?.time
                                     ?: Long.MIN_VALUE
                             }
                             .firstOrNull()
 
                         val latestVlDate = latestMappedVl?.let {
-                            DateUtils.parseDate(it.dateResultReported)
-                                ?: DateUtils.parseDate(it.dateAssayed)
-                                ?: DateUtils.parseDate(it.dateSampleCollected)
+                            it.resultDate ?: it.assayedDate ?: it.sampleDate
                         }
 
-                        val pending = latestMappedVl?.resultPending == true || latestMappedVl?.resultRaw.isNullOrBlank()
-                        val sampleDate = latestMappedVl?.dateSampleCollected?.let(DateUtils::parseDate)
+                        val pending = latestMappedVl?.resultRaw.isNullOrBlank()
+                        val sampleDate = latestMappedVl?.sampleDate
                         val pendingAgeDays = sampleDate?.let {
                             java.util.concurrent.TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time).toInt()
                         } ?: 0
@@ -124,7 +122,7 @@ class ViralLoadViewModel @Inject constructor(
                                         pending && pendingAgeDays > 30 -> "Overdue sample with no Result"
                                         pending -> "Result Pending"
                                         else -> {
-                                            val numeric = latestMappedVl?.resultNumeric
+                                            val numeric = latestMappedVl?.resultNumeric?.toDouble()
                                             when {
                                                 numeric != null && numeric <= 20 -> "Undetected"
                                                 numeric != null && numeric < 1000 -> "Suppressed"

@@ -3,12 +3,12 @@
 import com.carecompanion.data.database.dao.ArtPharmacyDao
 import com.carecompanion.data.database.dao.BiometricDao
 import com.carecompanion.data.database.dao.PatientDao
+import com.carecompanion.data.database.dao.ViralLoadHistoryDao
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.Patient
-import com.carecompanion.data.network.WincoApiService
-import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Date
@@ -18,7 +18,7 @@ class PatientRepositoryImpl @Inject constructor(
     private val patientDao: PatientDao,
     private val biometricDao: BiometricDao,
     private val artPharmacyDao: ArtPharmacyDao,
-    private val wincoApiService: WincoApiService
+    private val viralLoadHistoryDao: ViralLoadHistoryDao
 ) : PatientRepository {
     override suspend fun getAllActivePatients() = patientDao.getAllActive()
     override suspend fun getAllActiveByFacility(facilityId: Long) = patientDao.getAllActiveByFacility(facilityId)
@@ -47,12 +47,13 @@ class PatientRepositoryImpl @Inject constructor(
     override fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptClientsByFacility(todayMs, facilityId)
     override fun observeMissedApptSearch(q: String, todayMs: Long) = artPharmacyDao.observeMissedApptSearch(q, todayMs)
     override fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long) = artPharmacyDao.observeMissedApptSearchByFacility(q, todayMs, facilityId)
+    // ART Refill
+    override fun observeArtRefillClients() = artPharmacyDao.observeArtRefillClients()
+    override fun observeArtRefillClientsByFacility(facilityId: Long) = artPharmacyDao.observeArtRefillClientsByFacility(facilityId)
+    override fun observeArtRefillSearch(q: String) = artPharmacyDao.observeArtRefillSearch(q)
+    override fun observeArtRefillSearchByFacility(q: String, facilityId: Long) = artPharmacyDao.observeArtRefillSearchByFacility(q, facilityId)
 
-    override suspend fun getViralLoadHistory(personUuid: String): List<WincoViralLoadHistoryItem> = withContext(Dispatchers.IO) {
-        runCatching {
-            wincoApiService.getViralLoadHistory(personUuid).items
-        }.getOrElse {
-            emptyList()
-        }
+    override suspend fun getViralLoadHistory(personUuid: String): List<ViralLoadHistory> = withContext(Dispatchers.IO) {
+        viralLoadHistoryDao.getByPersonUuid(personUuid)
     }
 }

@@ -8,6 +8,7 @@ import com.carecompanion.data.network.models.WincoSummary
 import com.carecompanion.data.network.models.WincoTokenRequest
 import com.carecompanion.data.network.models.WincoTokenResponse
 import com.carecompanion.data.network.models.WincoViralLoadHistoryResponse
+import com.carecompanion.data.network.models.WincoPharmacyHistoryResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -133,4 +134,9 @@ interface WincoApiService {
     suspend fun getViralLoadHistory(
         @Path("person_uuid") personUuid: String,
     ): WincoViralLoadHistoryResponse
+
+    @GET("api/art/clients/{person_uuid}/pharmacy-history")
+    suspend fun getPharmacyHistory(
+        @Path("person_uuid") personUuid: String,
+    ): WincoPharmacyHistoryResponse
 }

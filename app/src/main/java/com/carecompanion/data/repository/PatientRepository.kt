@@ -4,7 +4,7 @@ import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.database.entities.Patient
-import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import com.carecompanion.data.database.entities.ViralLoadHistory
 import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
@@ -37,6 +37,10 @@ interface PatientRepository {
     fun observeMissedApptClientsByFacility(todayMs: Long, facilityId: Long): Flow<List<IITClient>>
     fun observeMissedApptSearch(q: String, todayMs: Long): Flow<List<IITClient>>
     fun observeMissedApptSearchByFacility(q: String, todayMs: Long, facilityId: Long): Flow<List<IITClient>>
+    fun observeArtRefillClients(): Flow<List<IITClient>>
+    fun observeArtRefillClientsByFacility(facilityId: Long): Flow<List<IITClient>>
+    fun observeArtRefillSearch(q: String): Flow<List<IITClient>>
+    fun observeArtRefillSearchByFacility(q: String, facilityId: Long): Flow<List<IITClient>>
 
-    suspend fun getViralLoadHistory(personUuid: String): List<WincoViralLoadHistoryItem>
+    suspend fun getViralLoadHistory(personUuid: String): List<ViralLoadHistory>
 }

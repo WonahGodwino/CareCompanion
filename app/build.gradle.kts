@@ -40,7 +40,7 @@ android {
     buildFeatures {
         buildConfig = true
          compose = true; viewBinding = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.4" }
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     // Pick-first rules for SecuGen FDx SDK Pro native .so files
     packaging {
         jniLibs { pickFirsts += setOf("lib/**/libjnisgfplib.so", "lib/**/libjnisgwsqlib.so", "lib/**/libjnisgnfiqlib.so") }
