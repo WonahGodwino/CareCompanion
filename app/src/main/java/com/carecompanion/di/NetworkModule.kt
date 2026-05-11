@@ -32,7 +32,7 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient =
         OkHttpClient.Builder()
-            .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
+            .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
             // Dynamically rewrite host/scheme/port from the saved server URL on every request
             .addInterceptor { chain ->
                 val savedUrl = SharedPreferencesHelper.getEmrBaseUrl(context)
@@ -94,7 +94,7 @@ object NetworkModule {
         OkHttpClient.Builder()
             // Silently refreshes the 7-day Bearer token on HTTP 401 responses.
             .authenticator(wincoAuthenticator)
-            .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
+            .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
             // Dynamically rewrite host/scheme/port from the saved WINCO URL on every request
             .addInterceptor { chain ->
                 val savedUrl = SharedPreferencesHelper.getWincoBaseUrl(context)

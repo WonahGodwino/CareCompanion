@@ -149,11 +149,11 @@ class SyncRepositoryImpl @Inject constructor(
     companion object {
         private const val TAG = "SyncRepository"
         private const val PAGE_LIMIT = 50
-        private const val PAGE_SIZE = 100
+        private const val PAGE_SIZE = 250
         // No inter-chunk delay — server is fast enough and delay compounds at scale.
         private const val BIOMETRIC_REQUEST_DELAY_MS = 0L
         private const val BIOMETRIC_PARALLELISM = 8
-        private const val DETAIL_PARALLELISM = 12
+        private const val DETAIL_PARALLELISM = 16
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_MS = 1000L
         private const val MIN_TEMPLATE_BYTES = 128
@@ -244,19 +244,21 @@ class SyncRepositoryImpl @Inject constructor(
                     break
                 }
 
-                // Pre-fetch ALL page patient details in parallel before any per-patient
-                // eligibility or demography checks. This converts N sequential API calls
-                // (one per patient lacking enrollmentUuid / demographics) into a single
-                // parallel batch, which is the main driver of slow sync runs.
-                ensureClientDetails(pagePatients.map { it.personUuid }, detailCache)
+                // Prefetch detail only when needed (missing enrollment UUID or missing
+                // demographics). Fetching detail for every row makes sync substantially
+                // slower on large cohorts.
+                val needingDetail = pagePatients
+                    .asSequence()
+                    .filter { it.enrollmentUuid.isNullOrBlank() || it.needsDemographyEnrichment() }
+                    .map { it.personUuid }
+                    .distinct()
+                    .toList()
+                ensureClientDetails(needingDetail, detailCache)
 
                 val eligiblePagePatients = pagePatients
                     .filter { it.isEnrollmentEligibleForPull(detailCache) }
                     .filter { seenPersonUuids.add(it.personUuid) }
                 val enrichedPagePatients = eligiblePagePatients.map { it.withDemographyFromPatientTableIfNeeded(detailCache) }
-
-                // No-op after pre-fetch above — all UUIDs are already cached.
-                ensureClientDetails(enrichedPagePatients.map { it.personUuid }, detailCache)
 
                 val patients = enrichedPagePatients.map { item ->
                     val detail = detailCache[item.personUuid]
@@ -270,8 +272,6 @@ class SyncRepositoryImpl @Inject constructor(
                         lastTbScreeningStatus = detail?.tbScreening?.status,
                     )
                 }
-
-                val pagePersonUuids = enrichedPagePatients.map { it.personUuid }.distinct()
 
                 // Wrap all page writes in a single transaction — eliminates per-insert
                 // journal flushes and gives a 3–5× speedup on DB-write latency.

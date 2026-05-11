@@ -1,5 +1,6 @@
 ﻿package com.carecompanion.presentation.ui.patient
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,9 +16,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import androidx.compose.foundation.clickable
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.presentation.navigation.Screen
@@ -135,12 +138,11 @@ fun PatientScreen(
 private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
     val palette = viralLoadPalette(current.resultLabel, current.statusLabel)
 
-    // Derive icon for the classification badge
     val badgeIcon = when (current.resultLabel) {
         "Unsuppressed" -> Icons.Default.Warning
-        "Undetected"   -> Icons.Default.CheckCircle
-        "Suppressed"   -> Icons.Default.VerifiedUser
-        else           -> Icons.Default.Science
+        "Undetected" -> Icons.Default.CheckCircle
+        "Suppressed" -> Icons.Default.VerifiedUser
+        else -> Icons.Default.Science
     }
 
     Card(
@@ -150,8 +152,6 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-
-            // ── Header stripe ───────────────────────────────────────────
             Surface(
                 color = palette.onContainer.copy(alpha = 0.10f),
                 modifier = Modifier.fillMaxWidth()
@@ -171,15 +171,12 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
                 }
             }
 
-            // ── Main hero body ───────────────────────────────────────────
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-
-                // Classification badge
                 Surface(
                     color = palette.onContainer.copy(alpha = 0.15f),
                     shape = RoundedCornerShape(50.dp)
@@ -194,13 +191,11 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
                             current.statusLabel.uppercase(),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.ExtraBold,
-                            color = palette.onContainer,
-                            letterSpacing = androidx.compose.ui.unit.TextUnit(1.5f, androidx.compose.ui.unit.TextUnitType.Sp)
+                            color = palette.onContainer
                         )
                     }
                 }
 
-                // Large VL value
                 Text(
                     current.resultValueLabel,
                     style = MaterialTheme.typography.displaySmall,
@@ -208,7 +203,6 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
                     color = palette.onContainer
                 )
 
-                // Result classification label
                 if (current.resultLabel.isNotBlank()) {
                     Text(
                         current.resultLabel,
@@ -218,14 +212,16 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
                     )
                 }
 
-                // Divider
                 HorizontalDivider(color = palette.onContainer.copy(alpha = 0.15f))
 
-                // Date + next due
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.CalendarToday, null, tint = palette.onContainer.copy(alpha = 0.70f), modifier = Modifier.size(14.dp))
-                        Text(current.dateLabel, style = MaterialTheme.typography.bodySmall, color = palette.onContainer.copy(alpha = 0.85f))
+                        Text(current.sampleDateLabel, style = MaterialTheme.typography.bodySmall, color = palette.onContainer.copy(alpha = 0.85f))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.Event, null, tint = palette.onContainer.copy(alpha = 0.70f), modifier = Modifier.size(14.dp))
+                        Text(current.resultDateLabel, style = MaterialTheme.typography.bodySmall, color = palette.onContainer.copy(alpha = 0.85f))
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.Schedule, null, tint = palette.onContainer.copy(alpha = 0.70f), modifier = Modifier.size(14.dp))
@@ -233,7 +229,6 @@ private fun ViralLoadCurrentCard(current: ViralLoadCurrentUiState) {
                     }
                 }
 
-                // Flag badge (overdue / pending)
                 current.flagLabel?.let { flag ->
                     Surface(
                         color = palette.flagContainer,
@@ -305,11 +300,6 @@ private fun ViralLoadHistoryCard(history: List<ViralLoadHistoryUiItem>) {
 @Composable
 private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
     val palette = viralLoadPalette(item.resultStatus, item.resultFlag)
-    val displayDate = when {
-        item.dateResultReported != null -> DateUtils.formatDate(item.dateResultReported)
-        item.dateSampleCollected != null -> DateUtils.formatDate(item.dateSampleCollected)
-        else -> "N/A"
-    }
     val header = when {
         item.isPending -> "Viral Load Sample Collection"
         item.resultNumeric != null -> "Viral Load Date"
@@ -359,7 +349,7 @@ private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
                 }
             }
 
-            // Date row
+            // Date rows
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -372,7 +362,25 @@ private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    displayDate,
+                    "Sample Date: ${item.dateSampleCollected?.let { DateUtils.formatDate(it) } ?: "N/A"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.onContainer.copy(alpha = 0.85f)
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Default.Event,
+                    null,
+                    tint = palette.onContainer.copy(alpha = 0.70f),
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    "Result Date: ${item.dateResultReported?.let { DateUtils.formatDate(it) } ?: "N/A"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.onContainer.copy(alpha = 0.85f)
                 )
@@ -657,7 +665,7 @@ private fun ServiceEligibilitySection(
     artRecords: List<ArtPharmacy>,
     currentViralLoad: ViralLoadCurrentUiState
 ) {
-    val latest = artRecords.maxByOrNull { it.visitDate?.time ?: Long.MIN_VALUE }
+    val latest = artRecords.maxByOrNull { it.visitDate.time }
     val daysOverdue = latest?.nextAppointment?.let {
         TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time).toInt().coerceAtLeast(0)
     } ?: 0
@@ -669,8 +677,8 @@ private fun ServiceEligibilitySection(
     val missedApptEligible = latest?.nextAppointment != null && daysOverdue >= 1
     val artRefillEligible = latest?.nextAppointment != null && (daysUntilNextAppt ?: Int.MAX_VALUE) <= 7
 
-    val vlPending = currentViralLoad.statusLabel.contains("Sample Collection", ignoreCase = true)
-    val vlOverduePending = currentViralLoad.statusLabel.contains("Overdue sample", ignoreCase = true)
+    val vlPending = currentViralLoad.isPendingResult
+    val vlOverduePending = currentViralLoad.isOverduePendingResult
     val vlEligible = currentViralLoad.eligibility?.isEligibleToday == true && !vlPending
 
     val items = listOf(
@@ -697,10 +705,10 @@ private fun ServiceEligibilitySection(
             "Viral Load",
             vlEligible,
             when {
-                vlOverduePending -> "Overdue sample with no Result"
-                vlPending -> "Sample collected, result pending (< 1 month)"
-                vlEligible -> "Eligible: ${currentViralLoad.resultLabel}"
-                else -> "Not eligible"
+                vlOverduePending -> "Over due pending result (>30 days since sample collection)"
+                vlPending -> "Pending Viral Load Result (sample collected, awaiting result)"
+                vlEligible -> "Eligible based on sample collection due date"
+                else -> "Not eligible by sample collection due date"
             }
         ),
         ServiceEligibilityItem("TPT", false, "Not eligible"),
@@ -709,38 +717,41 @@ private fun ServiceEligibilitySection(
     )
     val eligibleCount = items.count { it.eligible }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Service Eligibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "$eligibleCount of ${items.size} services currently eligible for this client.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Other services summary card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Service Eligibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "$eligibleCount of ${items.size} services currently eligible for this client.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-            items.forEachIndexed { idx, item ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(item.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Surface(
-                        shape = MaterialTheme.shapes.small,
-                        color = if (item.eligible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+                items.forEachIndexed { idx, item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            if (item.eligible) "Eligible" else "Not Eligible",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (item.eligible) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(item.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = if (item.eligible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                if (item.eligible) "Eligible" else "Not Eligible",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (item.eligible) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                     }
+                    if (idx < items.lastIndex) HorizontalDivider()
                 }
-                if (idx < items.lastIndex) HorizontalDivider()
             }
         }
     }

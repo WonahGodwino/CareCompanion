@@ -18,6 +18,7 @@ data class ViralLoadEligibilityResult(
     val daysOverdue: Int,
     val ageYears: Int,
     val message: String,
+    val sampleCollectionDate: Date? = null,  // Date sample was collected (for tracking pending results)
 )
 
 object ViralLoadEligibilityEngine {
@@ -34,7 +35,8 @@ object ViralLoadEligibilityEngine {
     fun evaluate(
         dateOfBirth: Date?,
         artRegistrationDate: Date?,
-        latestViralLoadDate: Date?,
+        dateSampleCollected: Date?,  // PEPFAR/NACA standard: use sample collection date for eligibility
+        dateResultReported: Date? = null,  // Result date (used only for displaying to user, not for eligibility)
         referenceDate: Date = Date(),
     ): ViralLoadEligibilityResult? {
         artRegistrationDate ?: return null
@@ -50,15 +52,17 @@ object ViralLoadEligibilityEngine {
         val dueType: ViralLoadDueType
         val dueDate: Date
 
-        if (latestViralLoadDate == null) {
-            // No mapped VL record yet: patient is tracked against baseline schedule.
+        if (dateSampleCollected == null) {
+            // No sample collected yet: patient is tracked against baseline schedule.
+            // Use ART registration date as reference point.
             dueType = ViralLoadDueType.BASELINE
             dueDate = addDays(normalizedArtDate, baselineOffset)
         } else {
-            // At least one mapped VL test exists: patient follows routine cadence from last VL date.
-            val normalizedLatestVl = atStartOfDay(latestViralLoadDate)
+            // Sample has been collected: patient follows routine cadence from sample collection date.
+            // Per PEPFAR/NACA standards, sample collection date (not result date) drives eligibility.
+            val normalizedSampleDate = atStartOfDay(dateSampleCollected)
             dueType = ViralLoadDueType.ROUTINE
-            dueDate = addDays(normalizedLatestVl, routineInterval)
+            dueDate = addDays(normalizedSampleDate, routineInterval)
         }
 
         val dayDelta = TimeUnit.MILLISECONDS.toDays(dueDate.time - normalizedReference.time).toInt()
@@ -81,7 +85,8 @@ object ViralLoadEligibilityEngine {
             daysUntilDue = daysUntilDue,
             daysOverdue = daysOverdue,
             ageYears = ageYears,
-            message = "$profile $cadenceText viral load is $timingText."
+            message = "$profile $cadenceText viral load is $timingText.",
+            sampleCollectionDate = dateSampleCollected
         )
     }
 
