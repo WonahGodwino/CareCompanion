@@ -176,16 +176,70 @@ fun VerifyScreen(
                 }
             }
 
-            // Finger selector
+            // Finger selector (left/right hand vertical columns)
             Text("Select Finger", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-            LazyVerticalGrid(columns = GridCells.Fixed(5), modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(FingerType.values()) { finger ->
-                    FilterChip(
-                        selected = uiState.selectedFinger == finger,
-                        onClick = { viewModel.selectFinger(finger) },
-                        label = { Text(finger.displayName.split(" ").last(), style = MaterialTheme.typography.labelSmall) },
-                        modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Left hand fingers (vertical)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    val leftFingers = listOf(
+                        FingerType.LEFT_THUMB,
+                        FingerType.LEFT_INDEX,
+                        FingerType.LEFT_MIDDLE,
+                        FingerType.LEFT_RING,
+                        FingerType.LEFT_LITTLE
                     )
+                    leftFingers.forEach { finger ->
+                        FilterChip(
+                            selected = uiState.selectedFinger == finger,
+                            onClick = { viewModel.selectFinger(finger) },
+                            label = {
+                                Text(
+                                    finger.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(24.dp))
+                // Right hand fingers (vertical)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    val rightFingers = listOf(
+                        FingerType.RIGHT_THUMB,
+                        FingerType.RIGHT_INDEX,
+                        FingerType.RIGHT_MIDDLE,
+                        FingerType.RIGHT_RING,
+                        FingerType.RIGHT_LITTLE
+                    )
+                    rightFingers.forEach { finger ->
+                        FilterChip(
+                            selected = uiState.selectedFinger == finger,
+                            onClick = { viewModel.selectFinger(finger) },
+                            label = {
+                                Text(
+                                    finger.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        )
+                    }
                 }
             }
 
@@ -204,7 +258,7 @@ fun VerifyScreen(
                                 color = if (selectedPatient == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
-                            Text("Selected: ${uiState.selectedFinger.displayName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Selected: ${uiState.selectedFinger.displayName} Finger", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Button(
                                 onClick = { viewModel.startScan(selectedPatient) },
                                 enabled = selectedPatient != null,
@@ -231,7 +285,7 @@ fun VerifyScreen(
                         VerifyStep.MATCHING -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(64.dp))
                             Text(
-                                selectedPatient?.let { "Matching ${uiState.selectedFinger.displayName} against ${it.fullName ?: it.hospitalNumber}..." }
+                                selectedPatient?.let { "Matching ${uiState.selectedFinger.displayName} Finger against ${it.fullName ?: it.hospitalNumber}..." }
                                     ?: "Matching...",
                                 textAlign = TextAlign.Center
                             )
@@ -275,7 +329,7 @@ fun VerifyScreen(
                         VerifyStep.NO_MATCH -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             Icon(Icons.Default.Cancel, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
                             Text("No Match Found", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
-                            Text("Score: ${"%.1f".format(uiState.matchScore)}% (threshold: 60%)", style = MaterialTheme.typography.bodySmall)
+                            Text("Score: ${"%.1f".format(uiState.matchScore)}% (threshold: 70%)", style = MaterialTheme.typography.bodySmall)
                             Button(onClick = viewModel::reset) { Text("Try Again") }
                         }
                         VerifyStep.ERROR -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {

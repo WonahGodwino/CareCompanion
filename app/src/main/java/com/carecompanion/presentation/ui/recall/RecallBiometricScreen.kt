@@ -13,14 +13,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.carecompanion.presentation.navigation.Screen
 import com.carecompanion.presentation.viewmodels.RecallBiometricViewModel
 import com.carecompanion.presentation.viewmodels.RecallStep
+import com.carecompanion.presentation.viewmodels.SharedViewModel
 import com.carecompanion.utils.DateUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecallBiometricScreen(
     navController: NavController,
+    sharedViewModel: SharedViewModel,
     viewModel: RecallBiometricViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -75,11 +78,20 @@ fun RecallBiometricScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Biometric Identification", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "${uiState.totalTemplateGroups} template groups loaded",
+                            "${uiState.totalBiometricTemplates} biometric templates from ${uiState.totalClientsWithBiometrics} clients loaded",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(scannerSummaryText, style = MaterialTheme.typography.labelSmall)
+                        uiState.lastScanTime?.let { lastScanTime ->
+                            val scanTime = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date(lastScanTime))
+                            Text(
+                                "Live scan captured: $scanTime",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                     Spacer(Modifier.width(8.dp))
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -128,7 +140,11 @@ fun RecallBiometricScreen(
                                     sex = mp.patient.sex,
                                     dateOfBirth = mp.patient.dateOfBirth?.let { DateUtils.formatDate(it) },
                                     matchScore = uiState.matchScore,
-                                    onScanAgain = viewModel::reset
+                                    onScanAgain = viewModel::reset,
+                                    onOpenProfile = {
+                                        sharedViewModel.setSelectedPatient(mp.patient)
+                                        navController.navigate(Screen.PatientProfile.createRoute(mp.patient.uuid))
+                                    }
                                 )
                             }
                         }
@@ -295,7 +311,8 @@ private fun MatchedContent(
     sex: String?,
     dateOfBirth: String?,
     matchScore: Double,
-    onScanAgain: () -> Unit
+    onScanAgain: () -> Unit,
+    onOpenProfile: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -348,6 +365,15 @@ private fun MatchedContent(
             Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Scan Again")
+        }
+
+        OutlinedButton(
+            onClick = onOpenProfile,
+            modifier = Modifier.fillMaxWidth(0.7f).height(48.dp)
+        ) {
+            Icon(Icons.Default.Person, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Open Profile")
         }
     }
 }

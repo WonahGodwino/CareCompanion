@@ -10,7 +10,10 @@ interface BiometricDao {
             SELECT * FROM biometric 
             WHERE hashed = :hash 
             AND personUuid = :personUuid
-            AND biometricType = :fingerType
+            AND (
+                UPPER(REPLACE(REPLACE(COALESCE(biometricType, ''), ' ', '_'), '-', '_')) = :fingerType
+                OR REPLACE(UPPER(REPLACE(REPLACE(COALESCE(templateType, ''), ' ', '_'), '-', '_')), '_FINGER', '') = :fingerType
+            )
             AND (archived IS NULL OR archived = 0)
             AND (:facilityId IS NULL OR facilityId = :facilityId)
             LIMIT 1
@@ -21,7 +24,10 @@ interface BiometricDao {
         @Query("""
             SELECT * FROM biometric 
             WHERE personUuid = :personUuid
-            AND biometricType = :fingerType
+            AND (
+                UPPER(REPLACE(REPLACE(COALESCE(biometricType, ''), ' ', '_'), '-', '_')) = :fingerType
+                OR REPLACE(UPPER(REPLACE(REPLACE(COALESCE(templateType, ''), ' ', '_'), '-', '_')), '_FINGER', '') = :fingerType
+            )
             AND (archived IS NULL OR archived = 0)
             AND (:facilityId IS NULL OR facilityId = :facilityId)
         """)
@@ -63,6 +69,15 @@ interface BiometricDao {
     """)
     suspend fun findByTemplateHash(hash: String, facilityId: Long?): Biometric?
 
+    @Query("SELECT * FROM biometric WHERE hashed = :hash AND COALESCE(archived, 0) = 0 LIMIT 1")
+    suspend fun findByTemplateHashAcrossAllFacilities(hash: String): Biometric?
+
+    @Query("SELECT * FROM biometric WHERE (hashed IS NULL OR hashed = '') AND COALESCE(archived, 0) = 0 LIMIT :limit")
+    suspend fun getBiometricsMissingHash(limit: Int): List<Biometric>
+
+    @Query("UPDATE biometric SET hashed = :hash WHERE id = :id")
+    suspend fun updateHashById(id: String, hash: String)
+
     // New: Get all by facility (for fallback matching)
     @Query("""
         SELECT * FROM biometric 
@@ -70,4 +85,7 @@ interface BiometricDao {
         AND (:facilityId IS NULL OR facilityId = :facilityId)
     """)
     suspend fun getAllByFacility(facilityId: Long?): List<Biometric>
+
+    @Query("SELECT * FROM biometric WHERE COALESCE(archived, 0) = 0")
+    suspend fun getAllBiometrics(): List<Biometric>
 }

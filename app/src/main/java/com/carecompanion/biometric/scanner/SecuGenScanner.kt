@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.Log
+import com.carecompanion.biometric.BiometricTemplateNormalizer
 import com.carecompanion.biometric.models.MatchResult
 import com.carecompanion.biometric.secugen.SecuGenDeviceInfo
 import com.carecompanion.biometric.secugen.SecuGenError
@@ -168,30 +169,60 @@ class SecuGenScanner(
         val lib = sgfpm ?: return MatchResult(0.0, false)
         if (template1.isEmpty() || template2.isEmpty()) return MatchResult(0.0, false)
         return try {
-            // Primary: boolean match decision
-            val matched  = BooleanArray(1)
-            val matchErr = lib.MatchTemplate(template1, template2, securityLevel.toLong(), matched)
-            if (matchErr != SGFDxErrorCode.SGFDX_ERROR_NONE) {
-                Log.w(TAG, "MatchTemplate error: ${SecuGenError.describe(matchErr.toInt())}")
-                return MatchResult(0.0, false)
+            val raw = attemptMatch(lib, template1, template2)
+            if (raw != null) {
+                return raw
             }
 
-            // Secondary: raw similarity score (0–199 → normalise to 0–100 %)
-            val rawScore = IntArray(1)
-            val scoreErr = lib.GetMatchingScore(template1, template2, rawScore)
-
-            val normalisedScore = when {
-                scoreErr == SGFDxErrorCode.SGFDX_ERROR_NONE -> (rawScore[0].toDouble() / 199.0) * 100.0
-                matched[0]                                  -> 75.0   // match confirmed, score unavailable
-                else                                        -> 15.0   // no match
+            val canonical1 = BiometricTemplateNormalizer.canonicalize(template1)
+            val canonical2 = BiometricTemplateNormalizer.canonicalize(template2)
+            val canonical = attemptMatch(lib, canonical1, canonical2)
+            if (canonical != null) {
+                return canonical
             }
 
-            Log.d(TAG, "Match: ${matched[0]}, raw=${rawScore[0]}, score=${"%.1f".format(normalisedScore)}%")
-            MatchResult(normalisedScore.coerceIn(0.0, 100.0), matched[0])
+            val targetSize = maxOf(template1.size, template2.size)
+            val padded = attemptMatch(lib, padTemplate(template1, targetSize), padTemplate(template2, targetSize))
+            if (padded != null) {
+                return padded
+            }
+
+            MatchResult(0.0, false)
         } catch (e: Exception) {
             Log.e(TAG, "matchTemplates error", e)
             MatchResult(0.0, false)
         }
+    }
+
+    private fun attemptMatch(lib: JSGFPLib, probe: ByteArray, reference: ByteArray): MatchResult? {
+        if (probe.isEmpty() || reference.isEmpty()) return null
+
+        val matched = BooleanArray(1)
+        val matchErr = lib.MatchTemplate(probe, reference, securityLevel.toLong(), matched)
+        if (matchErr != SGFDxErrorCode.SGFDX_ERROR_NONE) {
+            Log.w(TAG, "MatchTemplate error: ${SecuGenError.describe(matchErr.toInt())}")
+            return null
+        }
+
+        val rawScore = IntArray(1)
+        val scoreErr = lib.GetMatchingScore(probe, reference, rawScore)
+        val normalisedScore = when {
+            scoreErr == SGFDxErrorCode.SGFDX_ERROR_NONE -> (rawScore[0].toDouble() / 199.0) * 100.0
+            matched[0]                                  -> 75.0
+            else                                        -> 15.0
+        }
+
+        Log.d(TAG, "Match variant: matched=${matched[0]}, raw=${rawScore[0]}, score=${"%.1f".format(normalisedScore)}%")
+        return MatchResult(normalisedScore.coerceIn(0.0, 100.0), matched[0])
+    }
+
+    private fun padTemplate(template: ByteArray, targetSize: Int): ByteArray {
+        if (template.size >= targetSize) {
+            return template
+        }
+        val out = ByteArray(targetSize)
+        System.arraycopy(template, 0, out, 0, template.size)
+        return out
     }
 
     override fun getQuality(): Int = lastQuality

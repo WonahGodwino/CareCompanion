@@ -56,4 +56,8 @@ class PatientRepositoryImpl @Inject constructor(
     override suspend fun getViralLoadHistory(personUuid: String): List<ViralLoadHistory> = withContext(Dispatchers.IO) {
         viralLoadHistoryDao.getByPersonUuid(personUuid)
     }
+
+    override suspend fun saveBiometric(biometric: Biometric) = withContext(Dispatchers.IO) {
+        biometricDao.insert(biometric)
+    }
 }

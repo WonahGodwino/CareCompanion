@@ -19,6 +19,7 @@ import java.util.Date
     ],
     indices = [
         Index(value = ["personUuid"]),
+        Index(value = ["hashed"]),
         Index(value = ["sourceId"]),
         Index(value = ["lastSyncDate"]),
         Index(value = ["archived"])

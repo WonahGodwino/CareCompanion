@@ -36,7 +36,7 @@ sealed class Screen(val route: String) {
 fun AppNavHost(navController: NavHostController=rememberNavController(), sharedViewModel: SharedViewModel, modifier: Modifier=Modifier) {
     NavHost(navController=navController, startDestination=Screen.Home.route, modifier=modifier) {
         composable(Screen.Home.route)           { HomeScreen(navController, sharedViewModel) }
-        composable(Screen.RecallBiometric.route){ RecallBiometricScreen(navController) }
+        composable(Screen.RecallBiometric.route){ RecallBiometricScreen(navController, sharedViewModel) }
         composable(Screen.Recall.route)         { RecallScreen(navController,sharedViewModel) }
         composable(Screen.Verify.route)         { VerifyScreen(navController,sharedViewModel) }
         composable(Screen.Sync.route)           { SyncScreen(navController,sharedViewModel) }

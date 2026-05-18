@@ -235,6 +235,7 @@ data class WincoBiometricEntry(
     @SerializedName("templateType")     val templateType: String?,
     @SerializedName("recapture")        val recapture: Int? = 0,
     @SerializedName("sourceId")         val sourceId: String?,                  // WINCO returns UUID/text source IDs
+    @SerializedName("templateHash")     val templateHash: String? = null,
     @SerializedName("biometricType")    val biometricType: String?,             // e.g. "FINGERPRINT", "RIGHT_THUMB"
     @SerializedName("enrollmentDate")   val enrollmentDate: String?,            // ISO date when finger was enrolled
     @SerializedName("iso")              val iso: Boolean? = false,

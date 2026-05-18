@@ -47,10 +47,12 @@ data class SettingsUiState(
     val viralLoadEnabled: Boolean = true,
     val tptEnabled: Boolean = true,
     val ahdEnabled: Boolean = true
+    ,val matchThreshold: Float = 0.7f
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+        private val syncRepositoryImpl: com.carecompanion.data.repository.SyncRepositoryImpl,
     @ApplicationContext private val context: Context,
     private val facilityDao: FacilityDao,
     private val patientDao: PatientDao,
@@ -62,7 +64,27 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    private val _backfillStatus = MutableStateFlow<String?>(null)
+    val backfillStatus: StateFlow<String?> = _backfillStatus.asStateFlow()
+
     init { loadSettings() }
+        fun onMatchThresholdChanged(value: Float) {
+            SharedPreferencesHelper.setMatchThreshold(context, value)
+            _uiState.update { it.copy(matchThreshold = value) }
+        }
+    fun triggerBiometricHashBackfill() {
+        viewModelScope.launch {
+            _backfillStatus.value = "Running biometric hash backfill..."
+            try {
+                com.carecompanion.data.repository.SyncRepositoryImpl.checkAndBackfillBiometricHashes(biometricDao)
+                _backfillStatus.value = "Biometric hash backfill complete. See logs for details."
+            } catch (e: Exception) {
+                _backfillStatus.value = "Backfill failed: ${e.message}"
+            }
+        }
+    }
+
+    fun clearBackfillStatus() { _backfillStatus.value = null }
 
     private fun loadSettings() {
         viewModelScope.launch {
@@ -82,7 +104,8 @@ class SettingsViewModel @Inject constructor(
                     missedApptsEnabled   = SharedPreferencesHelper.isMissedApptsReminderEnabled(context),
                     viralLoadEnabled     = SharedPreferencesHelper.isViralLoadReminderEnabled(context),
                     tptEnabled           = SharedPreferencesHelper.isTptReminderEnabled(context),
-                    ahdEnabled           = SharedPreferencesHelper.isAhdAlertEnabled(context)
+                    ahdEnabled           = SharedPreferencesHelper.isAhdAlertEnabled(context),
+                    matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
                 )
             }
         }

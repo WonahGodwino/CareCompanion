@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
 interface PatientRepository {
+        suspend fun saveBiometric(biometric: com.carecompanion.data.database.entities.Biometric)
     suspend fun getAllActivePatients(): List<Patient>
     suspend fun getAllActiveByFacility(facilityId: Long): List<Patient>
     suspend fun searchPatients(query: String): List<Patient>

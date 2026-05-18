@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.carecompanion.biometric.BiometricManager
 import com.carecompanion.biometric.models.FingerType
+import com.carecompanion.biometric.models.FingerLabelNormalizer
 import com.carecompanion.biometric.models.MatchResult
 import com.carecompanion.biometric.models.MatchedPatient
 import com.carecompanion.biometric.secugen.PoorQualityException
@@ -131,36 +132,68 @@ class VerifyViewModel @Inject constructor(
             val matchResult = syncRepository.findPatientByBiometricForVerification(
                 template,
                 selectedPatient.uuid,
-                selectedFinger.name
+                selectedFinger.name,
+                selectedPatient.facilityId
             )
             if (matchResult != null && matchResult.patient != null && matchResult.template != null) {
                 _uiState.update {
                     it.copy(
                         step = VerifyStep.MATCHED,
                         matchedPatient = MatchedPatient(matchResult.patient, matchResult.template, matchResult.confidence),
-                        matchScore = matchResult.confidence
+                        matchScore = matchResult.confidence * 100.0
                     )
                 }
                 return
             }
-            _uiState.update { it.copy(step = VerifyStep.NO_MATCH, matchScore = matchResult?.confidence ?: 0.0) }
+
+            val sdkFallback = runSdkVerificationFallback(template, selectedPatient, selectedFinger)
+            if (sdkFallback != null) {
+                _uiState.update {
+                    it.copy(
+                        step = VerifyStep.MATCHED,
+                        matchedPatient = MatchedPatient(sdkFallback.first, sdkFallback.second, sdkFallback.third),
+                        matchScore = sdkFallback.third
+                    )
+                }
+                return
+            }
+
+            _uiState.update { it.copy(step = VerifyStep.NO_MATCH, matchScore = (matchResult?.confidence ?: 0.0) * 100.0) }
         } catch (e: Exception) {
             _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = e.message) }
         }
     }
 
+    private suspend fun runSdkVerificationFallback(
+        probe: ByteArray,
+        selectedPatient: Patient,
+        selectedFinger: FingerType
+    ): Triple<Patient, Biometric, Double>? {
+        val gallery = patientRepository.getBiometricsForPatient(selectedPatient.uuid)
+            .filter { matchesSelectedFinger(it, selectedFinger) }
+        val best = findBestMatch(probe, gallery) ?: return null
+        return Triple(selectedPatient, best.first, best.second.score)
+    }
+
+    private fun normalizeFingerLabel(value: String?): String {
+        return FingerLabelNormalizer.canonicalize(value)
+    }
+
     private fun matchesSelectedFinger(biometric: Biometric, selectedFinger: FingerType): Boolean {
-        val templateType = biometric.templateType?.trim()?.replace("_", " ")?.lowercase()
-        val displayName = selectedFinger.displayName.lowercase()
-        val enumName = selectedFinger.name.replace("_", " ").lowercase()
-        return templateType == displayName || templateType == enumName
+        val selected = normalizeFingerLabel(selectedFinger.name)
+        val bioType = normalizeFingerLabel(biometric.biometricType)
+        val templateType = normalizeFingerLabel(biometric.templateType)
+        return selected == bioType || selected == templateType
     }
 
     private fun findBestMatch(probe: ByteArray, gallery: List<Biometric>): Pair<Biometric, MatchResult>? {
         var best: Pair<Biometric, MatchResult>? = null
+        // For verification (1:1), use a moderate threshold
+        // SL_HIGH security level is conservative, so we use 55.0 instead of default 60.0
+        val verificationThreshold = 55.0
         for (bio in gallery) {
             val result = biometricManager.match(probe, bio.template)
-            if (result.isMatch && (best == null || result.score > best.second.score)) {
+            if (result.score >= verificationThreshold && (best == null || result.score > best.second.score)) {
                 best = Pair(bio, result)
             }
         }

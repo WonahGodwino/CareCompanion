@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class],version=14,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class],version=15,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -149,10 +149,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Speed up hash-first biometric verification and identification.
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_biometric_hashed` ON `biometric` (`hashed`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_biometric_hashed_archived` ON `biometric` (`hashed`, `archived`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_biometric_hashed_facilityId` ON `biometric` (`hashed`, `facilityId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

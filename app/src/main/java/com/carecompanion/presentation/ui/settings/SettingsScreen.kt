@@ -36,7 +36,10 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val backfillStatus by viewModel.backfillStatus.collectAsState()
     var showPassword by remember { mutableStateOf(false) }
+
+    // ...existing code...
     var showClearConfirm by remember { mutableStateOf(false) }
     var showFacilityPickerManual by remember { mutableStateOf(false) }
 
@@ -78,6 +81,34 @@ fun SettingsScreen(
             val crashLogFile = remember { com.carecompanion.utils.CrashLogger.getLogFile(context) }
             var showCrashLogDialog by remember { mutableStateOf(false) }
             if (crashLogFile != null) {
+                            // ── Biometric Hash Backfill ─────────────────────────────
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                                elevation = CardDefaults.cardElevation(2.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Biometric Consistency Check", fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Ensure all enrolled biometrics have hashes and required metadata. Run this after upgrades or data imports.", style = MaterialTheme.typography.bodySmall)
+                                    Spacer(Modifier.height(8.dp))
+                                    Button(onClick = { viewModel.triggerBiometricHashBackfill() }) {
+                                        Icon(Icons.Default.Build, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Run Biometric Hash Backfill")
+                                    }
+                                    if (backfillStatus != null) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(backfillStatus ?: "", color = MaterialTheme.colorScheme.primary)
+                                        LaunchedEffect(backfillStatus) {
+                                            if (backfillStatus != null) {
+                                                delay(4000)
+                                                viewModel.clearBackfillStatus()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("Crash Log Available", fontWeight = FontWeight.SemiBold)
@@ -205,24 +236,30 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
 
-            HorizontalDivider()
 
-            // ── Build Info ────────────────────────────────────────
-            Text("Build Info", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
+            // ── Match Threshold ─────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Biometric Match Threshold", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Adjust the minimum score required for a biometric match (0.5 = 50%, 0.9 = 90%). Lower for more matches, higher for stricter.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Slider(
+                        value = uiState.matchThreshold,
+                        onValueChange = { viewModel.onMatchThresholdChanged(it) },
+                        valueRange = 0.5f..0.95f,
+                        steps = 9
                     )
-                    Text(
-                        "Build UTC: ${BuildConfig.BUILD_TIME_UTC}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("Current: ${(uiState.matchThreshold * 100).toInt()}%", fontWeight = FontWeight.Medium)
                 }
             }
+
+            HorizontalDivider()
+            // ...existing code...
 
             HorizontalDivider()
 

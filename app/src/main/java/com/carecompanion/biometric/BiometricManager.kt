@@ -9,6 +9,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.carecompanion.biometric.models.MatchResult
 import com.carecompanion.biometric.scanner.BiometricScanner
 import com.carecompanion.biometric.scanner.ScannerStatus
@@ -137,25 +138,24 @@ class BiometricManager @Inject constructor() {
     fun initialize(context: Context) {
         appContext = context.applicationContext
 
-        // Fix for API level 26+ lint error: Only use receiverFlag overload on API 26+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val receiverFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                Context.RECEIVER_EXPORTED else 0
-
-            context.registerReceiver(usbPermissionReceiver,
-                IntentFilter(ACTION_USB_PERMISSION), receiverFlag)
-            context.registerReceiver(usbAttachReceiver,
-                IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED), receiverFlag)
-            context.registerReceiver(usbDetachReceiver,
-                IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED), receiverFlag)
-        } else {
-            context.registerReceiver(usbPermissionReceiver,
-                IntentFilter(ACTION_USB_PERMISSION))
-            context.registerReceiver(usbAttachReceiver,
-                IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED))
-            context.registerReceiver(usbDetachReceiver,
-                IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED))
-        }
+        ContextCompat.registerReceiver(
+            context,
+            usbPermissionReceiver,
+            IntentFilter(ACTION_USB_PERMISSION),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        ContextCompat.registerReceiver(
+            context,
+            usbAttachReceiver,
+            IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        ContextCompat.registerReceiver(
+            context,
+            usbDetachReceiver,
+            IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         // Check if a scanner is already plugged in
         UsbBiometricScanner.findSupportedDevice(context)?.let { device ->

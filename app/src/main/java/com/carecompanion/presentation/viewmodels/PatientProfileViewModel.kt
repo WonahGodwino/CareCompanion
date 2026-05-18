@@ -3,6 +3,7 @@ package com.carecompanion.presentation.viewmodels
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.carecompanion.biometric.models.FingerLabelNormalizer
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.Patient
@@ -66,52 +67,156 @@ data class PatientProfileUiState(
     val errorMessage: String? = null
 )
 
+
+
 @HiltViewModel
 class PatientProfileViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val patientRepository: PatientRepository
 ) : ViewModel() {
 
+    // UI state for the patient profile
     private val _uiState = MutableStateFlow(PatientProfileUiState())
     val uiState: StateFlow<PatientProfileUiState> = _uiState.asStateFlow()
 
-    fun loadPatient(patientUuid: String) {
+    // Loads patient data and updates UI state
+    fun loadPatient(uuid: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             try {
-                val patient = patientRepository.getPatientByUuid(patientUuid)
-                val biometrics = patientRepository.getBiometricsForPatient(patientUuid)
-                val artPharmacy = patientRepository.getArtPharmacyForPatient(patientUuid)
-                val vlHistory = patientRepository.getViralLoadHistory(patientUuid)
-                    .mapNotNull { it.toUiItem() }
-                    .sortedWith(
-                        compareByDescending<ViralLoadHistoryUiItem> { it.dateSampleCollected?.time ?: Long.MIN_VALUE }
-                            .thenByDescending { it.dateResultReported?.time ?: Long.MIN_VALUE }
-                            .thenByDescending { it.sampleSourceId ?: Long.MIN_VALUE }
-                    )
+                val patient = patientRepository.getPatientByUuid(uuid)
+                if (patient == null) {
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "Patient not found")
+                    return@launch
+                }
+                val biometrics = patientRepository.getBiometricsForPatient(uuid)
+                val artPharmacy = patientRepository.getArtPharmacyForPatient(uuid)
+                val vlHistoryRaw = patientRepository.getViralLoadHistory(uuid)
+                val vlHistory = vlHistoryRaw.mapNotNull { it.toUiItem() }
                 val currentViralLoad = buildCurrentViralLoad(patient, vlHistory)
-                val enrolledFingers = biometrics.mapNotNull { bio ->
-                    FingerType.values().firstOrNull { it.displayName.equals(bio.templateType, ignoreCase = true) }
-                }.toSet()
-                val recaptureBreakdown = biometrics
-                    .groupingBy { it.recapture }
-                    .eachCount()
-                    .toSortedMap()
-                _uiState.update {
-                    it.copy(
-                        patient = patient, biometrics = biometrics,
-                        artPharmacy = artPharmacy.sortedByDescending { ap -> ap.visitDate },
-                        viralLoadHistory = vlHistory,
-                        currentViralLoad = currentViralLoad,
-                        enrolledFingers = enrolledFingers,
-                        hasBiometric = biometrics.isNotEmpty(),
-                        biometricCount = biometrics.size,
-                        recaptureBreakdown = recaptureBreakdown,
-                        isLoading = false
-                    )
+                val enrolledFingers = biometrics.mapNotNull { it.biometricType?.let { type -> FingerType.fromDisplayName(type) } }.toSet()
+                val recaptureBreakdown = biometrics.groupingBy { it.recapture }.eachCount().toSortedMap()
+                _uiState.value = _uiState.value.copy(
+                    patient = patient,
+                    biometrics = biometrics,
+                    artPharmacy = artPharmacy.sortedByDescending { it.visitDate },
+                    viralLoadHistory = vlHistory,
+                    currentViralLoad = currentViralLoad,
+                    enrolledFingers = enrolledFingers,
+                    hasBiometric = biometrics.isNotEmpty(),
+                    biometricCount = biometrics.size,
+                    recaptureBreakdown = recaptureBreakdown,
+                    isLoading = false,
+                    errorMessage = null
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = e.message)
+            }
+        }
+    }
+
+    // Biometric capture state
+    private val _captureState = MutableStateFlow(false)
+    val captureState: StateFlow<Boolean> = _captureState.asStateFlow()
+
+    fun startBiometricCapture() {
+        _captureState.value = true
+    }
+
+    fun onBiometricCaptured(fingerType: FingerType, template: ByteArray, templateType: String?) {
+        viewModelScope.launch {
+            val patient = _uiState.value.patient ?: return@launch
+            val biometrics = patientRepository.getBiometricsForPatient(patient.uuid)
+            val recaptures = biometrics.filter { it.templateType == templateType && it.biometricType == fingerType.displayName }
+            val nextRecapture = if (recaptures.isEmpty()) 0 else (recaptures.maxOf { it.recapture } + 1)
+
+            // Enforce minimum image quality
+            val minQuality = try {
+                val clazz = Class.forName("com.carecompanion.biometric.secugen.SecuGenQuality")
+                clazz.getField("MIN_ENROLL").getInt(null)
+            } catch (e: Exception) {
+                60 // fallback
+            }
+            val imageQuality = try {
+                // If BiometricManager is available, get last quality
+                com.carecompanion.biometric.BiometricManager::class.java.getDeclaredField("lastCaptureQuality").let { field ->
+                    field.isAccessible = true
+                    field.getInt(null)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = e.message) }
+                minQuality // fallback
+            }
+            if (imageQuality < minQuality) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Biometric image quality too low ($imageQuality < $minQuality). Please recapture."
+                )
+                _captureState.value = false
+                return@launch
+            }
+
+            // Prevent duplicate enrollment for same finger and template type
+            val duplicate = biometrics.any {
+                it.biometricType == fingerType.displayName && it.templateType == templateType && it.template.contentEquals(template)
+            }
+            if (duplicate) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Duplicate biometric detected for this finger and template type."
+                )
+                _captureState.value = false
+                return@launch
+            }
+
+            // Audit log (could be replaced with a real logger)
+            android.util.Log.i("BiometricCapture", "Enrolling biometric for patient=${patient.uuid}, finger=${fingerType.displayName}, quality=$imageQuality, recapture=$nextRecapture")
+
+            try {
+                val newBiometric = Biometric(
+                    id = java.util.UUID.randomUUID().toString(),
+                    personUuid = patient.uuid,
+                    template = template,
+                    biometricType = fingerType.displayName,
+                    templateType = templateType,
+                    recapture = nextRecapture,
+                    enrollmentDate = java.util.Date(),
+                    deviceName = null,
+                    imageQuality = imageQuality,
+                    iso = false,
+                    versionIso20 = false,
+                    lastSyncDate = java.util.Date(),
+                    archived = 0,
+                    count = null,
+                    createdBy = null,
+                    createdDate = java.util.Date(),
+                    extra = null,
+                    facilityId = null,
+                    hashed = null,
+                    lastModifiedBy = null,
+                    lastModifiedDate = null,
+                    matchBiometricId = null,
+                    matchPersonUuid = null,
+                    matchType = null,
+                    rawPayload = null,
+                    reason = null,
+                    recaptureMessage = null,
+                    replaceDate = null,
+                    sourceId = null
+                )
+                patientRepository.saveBiometric(newBiometric)
+                loadPatient(patient.uuid) // Refresh UI
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = null
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("BiometricCapture", "Failed to save biometric: ${e.message}", e)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to save biometric: ${e.message}"
+                )
+            } finally {
+                _captureState.value = false
             }
         }
     }

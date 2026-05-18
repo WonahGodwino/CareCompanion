@@ -8,6 +8,16 @@ import androidx.security.crypto.MasterKeys
 import com.carecompanion.CareCompanionApplication
 
 object SharedPreferencesHelper {
+        private const val KEY_MATCH_THRESHOLD = "match_threshold"
+        fun setMatchThreshold(context: Context, value: Float) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putFloat(KEY_MATCH_THRESHOLD, value).apply()
+        }
+
+        fun getMatchThreshold(context: Context): Float {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            return prefs.getFloat(KEY_MATCH_THRESHOLD, 0.7f)
+        }
     // ...existing code...
     private const val PREF_NAME = "care_companion_prefs"
     private const val TAG = "SharedPreferencesHelper"

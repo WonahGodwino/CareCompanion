@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import androidx.room.withTransaction
+import com.carecompanion.biometric.BiometricTemplateNormalizer
 import com.carecompanion.data.database.AppDatabase
 import com.carecompanion.data.database.dao.ArtPharmacyDao
 import com.carecompanion.data.database.dao.BiometricDao
@@ -28,6 +29,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
 import java.util.Date
 import javax.inject.Inject
@@ -44,13 +47,18 @@ class SyncRepositoryImpl @Inject constructor(
     private val syncLogDao: SyncLogDao,
     private val viralLoadHistoryDao: ViralLoadHistoryDao,
 ) : SyncRepository {
+    private val hashBackfillMutex = Mutex()
+    @Volatile private var hashBackfillCompleted = false
 
     override suspend fun findPatientByBiometric(
         capturedTemplate: ByteArray,
         facilityId: Long?
     ): PatientMatchResult? {
-        val capturedHash = sha256Hex(capturedTemplate)
-        val hashMatch = biometricDao.findByTemplateHash(capturedHash, facilityId)
+        // Identification is intentionally global by policy; facilityId is ignored here.
+        ensureBiometricHashesBackfilled()
+        val normalizedCapturedTemplate = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val capturedHash = sha256Hex(normalizedCapturedTemplate)
+        val hashMatch = biometricDao.findByTemplateHashAcrossAllFacilities(capturedHash)
         if (hashMatch != null) {
             Log.d(TAG, "Hash match found for patient: ${hashMatch.personUuid}")
             return PatientMatchResult(
@@ -60,26 +68,32 @@ class SyncRepositoryImpl @Inject constructor(
                 confidence = 1.0
             )
         }
-        val allBiometrics = biometricDao.getAllByFacility(facilityId)
+
+        // Fallback: template similarity search across all biometrics
+        val allBiometrics = biometricDao.getAllBiometrics()
+        val capturedFeatures = templateFeatures(normalizedCapturedTemplate)
         var bestMatch: Biometric? = null
         var bestScore = 0.0
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
         for (bio in allBiometrics) {
-            val score = compareTemplates(capturedTemplate, bio.template)
-            if (score > bestScore && score > MATCH_THRESHOLD) {
+            val score = compareTemplates(capturedFeatures, bio.template)
+            if (score > bestScore && score > matchThreshold) {
                 bestScore = score
                 bestMatch = bio
             }
         }
-        return if (bestMatch != null) {
-            PatientMatchResult(
+        if (bestMatch != null) {
+            Log.w(TAG, "Template fallback match for patient: ${bestMatch.personUuid} (score=$bestScore)")
+            return PatientMatchResult(
                 patient = patientDao.getByUuid(bestMatch.personUuid),
                 template = bestMatch,
                 matchType = MatchType.TEMPLATE,
                 confidence = bestScore
             )
         } else {
-            null
+            Log.e(TAG, "No biometric match found: hash miss, no fallback match above threshold.")
         }
+        return null
     }
 
     override suspend fun findPatientByBiometricForVerification(
@@ -88,8 +102,11 @@ class SyncRepositoryImpl @Inject constructor(
         fingerType: String,
         facilityId: Long?
     ): PatientMatchResult? {
-        val capturedHash = sha256Hex(capturedTemplate)
-        val hashMatch = biometricDao.findByTemplateHashForPersonAndFinger(capturedHash, personUuid, fingerType, facilityId)
+        ensureBiometricHashesBackfilled()
+        val normalizedFingerType = normalizeBiometricType(fingerType)
+        val normalizedCapturedTemplate = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val capturedHash = sha256Hex(normalizedCapturedTemplate)
+        val hashMatch = biometricDao.findByTemplateHashForPersonAndFinger(capturedHash, personUuid, normalizedFingerType, facilityId)
         if (hashMatch != null) {
             Log.d(TAG, "Hash match found for verification: ${hashMatch.personUuid} $fingerType")
             return PatientMatchResult(
@@ -99,12 +116,14 @@ class SyncRepositoryImpl @Inject constructor(
                 confidence = 1.0
             )
         }
-        val fingerBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, fingerType, facilityId)
+        val fingerBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, normalizedFingerType, facilityId)
+        val capturedFeatures = templateFeatures(normalizedCapturedTemplate)
         var bestMatch: Biometric? = null
         var bestScore = 0.0
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
         for (bio in fingerBiometrics) {
-            val score = compareTemplates(capturedTemplate, bio.template)
-            if (score > bestScore && score > MATCH_THRESHOLD) {
+            val score = compareTemplates(capturedFeatures, bio.template)
+            if (score > bestScore && score > matchThreshold) {
                 bestScore = score
                 bestMatch = bio
             }
@@ -121,16 +140,110 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun compareTemplates(template1: ByteArray, template2: ByteArray): Double {
-        if (template1.contentEquals(template2)) {
+    private data class TemplateFeatures(
+        val bytes: ByteArray,
+        val blockHashes: Set<Int>
+    )
+
+    private fun templateFeatures(template: ByteArray): TemplateFeatures {
+        val normalizedTemplate = BiometricTemplateNormalizer.canonicalize(template)
+        return TemplateFeatures(
+            bytes = normalizedTemplate,
+            blockHashes = computeBlockHashes(normalizedTemplate, BLOCK_SIZE)
+        )
+    }
+
+    private fun computeBlockHashes(template: ByteArray, blockSize: Int): Set<Int> {
+        if (template.isEmpty()) {
+            return emptySet()
+        }
+
+        val estimatedBlocks = (template.size + blockSize - 1) / blockSize
+        val hashes = HashSet<Int>(estimatedBlocks)
+
+        var start = 0
+        while (start < template.size) {
+            val end = minOf(start + blockSize, template.size)
+            var hash = 1
+            var i = start
+            while (i < end) {
+                hash = (31 * hash) + template[i].toInt()
+                i++
+            }
+            hashes.add(hash)
+            start = end
+        }
+
+        return hashes
+    }
+
+    private fun compareTemplates(template1: TemplateFeatures, template2: ByteArray): Double {
+        val normalizedTemplate2 = BiometricTemplateNormalizer.canonicalize(template2)
+        if (template1.bytes.isEmpty() || normalizedTemplate2.isEmpty()) {
+            return 0.0
+        }
+        if (template1.bytes.contentEquals(normalizedTemplate2)) {
             return 1.0
         }
-        val blockSize = 64
-        val blocks1 = template1.toList().chunked(blockSize).map { it.hashCode() }.toSet()
-        val blocks2 = template2.toList().chunked(blockSize).map { it.hashCode() }.toSet()
-        val intersection = blocks1.intersect(blocks2).size
-        val union = blocks1.union(blocks2).size
-        return if (union > 0) intersection.toDouble() / union.toDouble() else 0.0
+
+        val maxLength = maxOf(template1.bytes.size, normalizedTemplate2.size)
+        val minLength = minOf(template1.bytes.size, normalizedTemplate2.size)
+        if (minLength == 0) {
+            return 0.0
+        }
+
+        val lengthSimilarity = minLength.toDouble() / maxLength.toDouble()
+        if (lengthSimilarity < 0.8) {
+            return 0.0
+        }
+
+        var equalBytes = 0
+        for (i in 0 until minLength) {
+            if (template1.bytes[i] == normalizedTemplate2[i]) {
+                equalBytes++
+            }
+        }
+        val byteSimilarity = equalBytes.toDouble() / minLength.toDouble()
+
+        val blocks2 = computeBlockHashes(normalizedTemplate2, BLOCK_SIZE)
+        var intersection = 0
+        for (hash in template1.blockHashes) {
+            if (blocks2.contains(hash)) {
+                intersection++
+            }
+        }
+        val union = template1.blockHashes.size + blocks2.size - intersection
+        val chunkSimilarity = if (union > 0) intersection.toDouble() / union.toDouble() else 0.0
+
+        // Weight exact byte alignment more heavily than block-level overlap.
+        return (byteSimilarity * 0.7) + (chunkSimilarity * 0.3)
+    }
+
+    private suspend fun ensureBiometricHashesBackfilled() {
+        if (hashBackfillCompleted) {
+            return
+        }
+
+        hashBackfillMutex.withLock {
+            if (hashBackfillCompleted) {
+                return
+            }
+
+            var totalUpdated = 0
+            val allBiometrics = biometricDao.getAllBiometrics()
+            for (bio in allBiometrics) {
+                val canonicalHash = sha256Hex(BiometricTemplateNormalizer.canonicalize(bio.template))
+                if (bio.hashed.isNullOrBlank() || bio.hashed != canonicalHash) {
+                    biometricDao.updateHashById(bio.id, canonicalHash)
+                    totalUpdated++
+                }
+            }
+
+            if (totalUpdated > 0) {
+                Log.i(TAG, "Backfilled biometric hashes for $totalUpdated records")
+            }
+            hashBackfillCompleted = true
+        }
     }
 
     data class PatientMatchResult(
@@ -158,11 +271,50 @@ class SyncRepositoryImpl @Inject constructor(
         private const val RETRY_DELAY_MS = 1000L
         private const val MIN_TEMPLATE_BYTES = 128
         private const val MIN_QUALITY_THRESHOLD = 40
-        private const val MATCH_THRESHOLD = 0.8
+        // MATCH_THRESHOLD is now configurable via SharedPreferences
+        private const val BLOCK_SIZE = 64
+        private const val HASH_BACKFILL_BATCH_SIZE = 500
         fun sha256Hex(bytes: ByteArray): String {
             val md = MessageDigest.getInstance("SHA-256")
             val digest = md.digest(bytes)
             return digest.joinToString("") { "%02x".format(it) }
+        }
+
+        fun normalizeBiometricType(value: String?): String {
+            return value
+                ?.trim()
+                ?.replace("-", "_")
+                ?.replace(" ", "_")
+                ?.uppercase()
+                .orEmpty()
+        }
+
+        /**
+         * Checks for biometrics missing hashes or required metadata and backfills hashes using the current hashing method.
+         * Logs details of any records updated or missing required fields.
+         */
+        suspend fun checkAndBackfillBiometricHashes(biometricDao: BiometricDao) {
+            val allBiometrics = biometricDao.getAll()
+            var updated = 0
+            var missingMeta = 0
+            for (bio in allBiometrics) {
+                val missingFields = mutableListOf<String>()
+                if (bio.template == null || bio.template.isEmpty()) missingFields.add("template")
+                if (bio.personUuid.isNullOrBlank()) missingFields.add("personUuid")
+                if (bio.biometricType.isNullOrBlank()) missingFields.add("biometricType")
+                if (missingFields.isNotEmpty()) {
+                    Log.e(TAG, "Biometric record ${bio.id} missing fields: ${missingFields.joinToString(", ")}")
+                    missingMeta++
+                    continue
+                }
+                val canonicalHash = sha256Hex(BiometricTemplateNormalizer.canonicalize(bio.template))
+                if (bio.hashed.isNullOrBlank() || bio.hashed != canonicalHash) {
+                    biometricDao.updateHashById(bio.id, canonicalHash)
+                    Log.i(TAG, "Backfilled hash for biometric ${bio.id} (personUuid=${bio.personUuid})")
+                    updated++
+                }
+            }
+            Log.i(TAG, "Biometric hash backfill complete. Updated: $updated, Missing metadata: $missingMeta, Total: ${allBiometrics.size}")
         }
     }
 
@@ -432,7 +584,7 @@ class SyncRepositoryImpl @Inject constructor(
                                 val typeKey = e.templateType?.replace(" ", "_") ?: "UNKNOWN"
 
                                 val templateBytes = try {
-                                    Base64.decode(tpl, Base64.DEFAULT)
+                                    BiometricTemplateNormalizer.canonicalize(Base64.decode(tpl, Base64.DEFAULT))
                                 } catch (ex: Exception) {
                                     Log.e(TAG, "Failed to decode template for $personUuid", ex)
                                     failedCount++
@@ -453,7 +605,7 @@ class SyncRepositoryImpl @Inject constructor(
                                     continue
                                 }
 
-                                val hash = sha256Hex(templateBytes)
+                                val hash = e.templateHash?.lowercase() ?: sha256Hex(templateBytes)
 
                                 val meta = when {
                                     e.sourceId != null -> biometricItems.firstOrNull { it.id == e.sourceId.toString() }
@@ -480,7 +632,7 @@ class SyncRepositoryImpl @Inject constructor(
                                     id = biometricId,
                                     personUuid = patient.uuid,
                                     template = templateBytes,
-                                    biometricType = meta?.biometricType ?: e.biometricType ?: "FINGERPRINT",
+                                    biometricType = normalizeBiometricType(meta?.biometricType ?: e.biometricType ?: "FINGERPRINT"),
                                     templateType = e.templateType,
                                     recapture = recapture,
                                     enrollmentDate = DateUtils.parseDate(meta?.enrollmentDate ?: e.enrollmentDate),

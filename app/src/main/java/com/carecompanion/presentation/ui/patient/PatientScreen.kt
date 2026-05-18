@@ -40,8 +40,34 @@ fun PatientScreen(
     viewModel: PatientProfileViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val captureState by viewModel.captureState.collectAsState()
 
     LaunchedEffect(patientId) { viewModel.loadPatient(patientId) }
+
+    // Biometric capture dialog
+    if (captureState) {
+        AlertDialog(
+            onDismissRequest = { /* Optionally reset state here if needed */ },
+            title = { Text("Capture Biometric") },
+            text = { Text("Simulate biometric capture for demonstration. Press 'Capture' to proceed.") },
+            confirmButton = {
+                Button(onClick = {
+                    // TODO: Replace with real capture logic
+                    val fingerType = com.carecompanion.biometric.models.FingerType.RIGHT_THUMB
+                    val template = ByteArray(256) { 1 } // Mocked template
+                    val templateType = "ISO"
+                    viewModel.onBiometricCaptured(fingerType, template, templateType)
+                }) {
+                    Text("Capture")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { /* Optionally reset state here if needed */ }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -79,6 +105,12 @@ fun PatientScreen(
                                 Icon(Icons.Default.Fingerprint, null)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Biometric Enrollment", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                                Spacer(Modifier.weight(1f))
+                                Button(onClick = { viewModel.startBiometricCapture() }) {
+                                    Icon(Icons.Default.Add, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Capture Biometric")
+                                }
                             }
                             Spacer(Modifier.height(12.dp))
                             Text(
