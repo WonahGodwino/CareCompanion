@@ -444,484 +444,40 @@ Instead of matching against all templates, use a two-pass approach:
 1. Quick-reject phase: Hash and basic metrics
 2. Progressive matching with top-N selection
 
-```kotlin
-suspend fun findPatientByBiometricForIdentificationProgressive(
-    capturedTemplate: ByteArray,
-    facilityId: Long? = null
-): PatientMatchResult? {
-    val startTime = System.currentTimeMillis()
-    val timeoutMs = 30000
-    
-    // Phase 1: Hash-based quick-reject (< 1 sec)
-    val normalizedTemplate = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
-    val capturedHash = sha256Hex(normalizedTemplate)
-    
-    val hashMatch = biometricDao.findByTemplateHashAcrossAllFacilities(capturedHash)
-    if (hashMatch != null) {
-        BiometricAuditLogger.logIdentification(
-            matchedPatientUuid = hashMatch.personUuid,
-            fingerType = "UNKNOWN",
-            matchScore = 100.0,
-            candidatesSearched = 1,
-            searchDurationMs = System.currentTimeMillis() - startTime,
-            method = "HASH"
-        )
-        return PatientMatchResult(...)
-    }
-    
-    // Phase 2: Progressive matching with early termination
-    val allBiometrics = biometricDao.getAllBiometrics()
-    var bestMatch: Biometric? = null
-    var bestScore = 0.0
-    var processed = 0
-    
-    for (enrolledBio in allBiometrics) {
-        if (System.currentTimeMillis() - startTime > timeoutMs) {
-            Log.w(TAG, "Search timeout after $processed records")
-            break
-        }
-        
-        val result = fingerprintMatcher.match(normalizedTemplate, enrolledBio.template, "IDENTIFY")
-        processed++
-        
-        if (result.score > bestScore) {
-            bestScore = result.score
-            if (result.score >= IDENTIFICATION_THRESHOLD) {
-                bestMatch = enrolledBio
-            }
-        }
-        
-        // Optional: Early termination if score very high
-        if (bestScore >= 90.0) break
-    }
-    
-    return if (bestMatch != null) {
-        PatientMatchResult(...)
-    } else null
-}
-```
-
----
-
 ### Enhancement 2: Implement Caching for Frequently Used Templates
 **Priority**: MEDIUM
-
-```kotlin
-class TemplateCache(private val maxSize: Int = 1000) {
-    private val cache = LinkedHashMap<String, List<Minutia>>(maxSize, 0.75f, true) {
-        removeEldestEntry(size > maxSize)
-    }
-    
-    fun getMinutiae(template: ByteArray): List<Minutia>? {
-        val hash = BiometricTemplateNormalizer.computeHash(template)
-        return cache[hash]
-    }
-    
-    fun putMinutiae(template: ByteArray, minutiae: List<Minutia>) {
-        val hash = BiometricTemplateNormalizer.computeHash(template)
-        cache[hash] = minutiae
-    }
-}
-```
-
----
 
 ### Enhancement 3: Add Multi-Finger Enrollment Support
 **Priority**: MEDIUM
 
-```kotlin
-data class EnrollmentProfile(
-    val personUuid: String,
-    val enrolledFingers: Map<String, FingerEnrollment>
-)
-
-data class FingerEnrollment(
-    val fingerType: String,
-    val templates: List<ByteArray>,
-    val enrollmentDate: Date,
-    val quality: Int
-)
-
-suspend fun verifyWithFallback(
-    probe: ByteArray,
-    personUuid: String,
-    primaryFinger: String,
-    fallbackFingers: List<String> = emptyList()
-): Boolean {
-    // Try primary finger first
-    val primaryResult = findPatientByBiometricForVerification(
-        probe, personUuid, primaryFinger
-    )
-    if (primaryResult?.isMatch == true) return true
-    
-    // Try fallback fingers
-    for (finger in fallbackFingers) {
-        val result = findPatientByBiometricForVerification(
-            probe, personUuid, finger
-        )
-        if (result?.isMatch == true) {
-            Log.i(TAG, "Verified using fallback finger: $finger")
-            return true
-        }
-    }
-    
-    return false
-}
-```
-
----
-
 ### Enhancement 4: Add Retry Counter and Learning
 **Priority**: MEDIUM
-
-```kotlin
-data class VerificationAttempt(
-    val personUuid: String,
-    val timestamp: Date,
-    val matched: Boolean,
-    val score: Double,
-    val fingerType: String,
-    val scanQuality: Int
-)
-
-class VerificationAnalytics {
-    suspend fun analyzeFailures(personUuid: String, days: Int = 30): FailureAnalysis {
-        val attempts = getAttemptsForPeriod(personUuid, days)
-        val failures = attempts.filter { !it.matched }
-        
-        return FailureAnalysis(
-            totalAttempts = attempts.size,
-            failureRate = failures.size.toDouble() / attempts.size,
-            averageScore = attempts.map { it.score }.average(),
-            poorQualityCaptures = failures.count { it.scanQuality < 50 },
-            pattern = identifyPattern(failures)
-        )
-    }
-}
-```
-
----
 
 ### Enhancement 5: Implement Adaptive Thresholds
 **Priority**: MEDIUM
 
-Instead of fixed thresholds, adjust based on:
-- Population statistics
-- Finger quality distribution
-- False acceptance/rejection rates
-
-```kotlin
-class AdaptiveThresholdEngine(private val analytics: VerificationAnalytics) {
-    suspend fun getAdaptiveThreshold(
-        fingerType: String,
-        facilityId: Long,
-        targetFAR: Double = 0.0001  // 1:100,000
-    ): Double {
-        val stats = analytics.getFingerTypeStats(fingerType, facilityId)
-        
-        // Start from SL_HIGH base
-        var threshold = 55.0
-        
-        // Adjust based on population statistics
-        if (stats.avgQuality > 75) threshold -= 2  // High quality population
-        if (stats.avgQuality < 50) threshold += 3  // Low quality population
-        
-        // Cap at reasonable bounds
-        return threshold.coerceIn(45.0, 70.0)
-    }
-}
-```
-
----
+Adjust based on population statistics and false acceptance/rejection rates.
 
 ### Enhancement 6: Add Quality Trend Analysis
 **Priority**: MEDIUM
 
-```kotlin
-class QualityTrendAnalyzer {
-    suspend fun analyzeQualityTrend(
-        personUuid: String,
-        fingerType: String,
-        windowDays: Int = 30
-    ): QualityTrend {
-        val captures = getRecentCaptures(personUuid, fingerType, windowDays)
-        
-        val trend = captures
-            .sortedBy { it.timestamp }
-            .map { it.quality }
-            .let { qualities ->
-                QualityTrend(
-                    avgQuality = qualities.average(),
-                    stdDeviation = calculateStdDev(qualities),
-                    trend = calculateTrend(qualities),
-                    recommendation = when {
-                        qualities.average() < 40 -> "Re-enroll with better finger condition"
-                        calculateTrend(qualities) < 0 -> "Quality degrading, monitor closely"
-                        else -> "Quality stable"
-                    }
-                )
-            }
-        
-        return trend
-    }
-}
-```
-
----
-
 ### Enhancement 7: Add Performance Profiling
 **Priority**: MEDIUM
-
-```kotlin
-object BiometricProfiler {
-    private val metrics = mutableMapOf<String, List<Long>>()
-    
-    inline fun <T> profileOperation(operationName: String, block: () -> T): T {
-        val startTime = System.nanoTime()
-        try {
-            return block()
-        } finally {
-            val duration = (System.nanoTime() - startTime) / 1_000_000  // ms
-            metrics.getOrPut(operationName) { mutableListOf() }
-                .add(duration)
-            
-            if (duration > 5000) {
-                Log.w("BiometricProfiler", "$operationName took ${duration}ms")
-            }
-        }
-    }
-    
-    fun getReport(): PerformanceReport {
-        return PerformanceReport(
-            metrics = metrics.mapValues { (_, durations) ->
-                OperationMetrics(
-                    count = durations.size,
-                    avgMs = durations.average(),
-                    minMs = durations.minOrNull() ?: 0,
-                    maxMs = durations.maxOrNull() ?: 0,
-                    p95Ms = durations.sorted().let { it[(it.size * 0.95).toInt()] }
-                )
-            }
-        )
-    }
-}
-```
-
----
 
 ### Enhancement 8: Add Circuit Breaker Pattern
 **Priority**: MEDIUM
 
-```kotlin
-class BiometricCircuitBreaker(
-    private val failureThreshold: Int = 5,
-    private val resetTimeoutMs: Long = 60000
-) {
-    private var failureCount = 0
-    private var lastFailureTime = 0L
-    private var state = CircuitState.CLOSED
-    
-    enum class CircuitState { CLOSED, OPEN, HALF_OPEN }
-    
-    suspend fun <T> execute(block: suspend () -> T): T {
-        when (state) {
-            CircuitState.OPEN -> {
-                if (System.currentTimeMillis() - lastFailureTime > resetTimeoutMs) {
-                    state = CircuitState.HALF_OPEN
-                    failureCount = 0
-                } else {
-                    throw BiometricServiceException("Circuit breaker is OPEN")
-                }
-            }
-            else -> {}
-        }
-        
-        return try {
-            block().also {
-                if (state == CircuitState.HALF_OPEN) {
-                    state = CircuitState.CLOSED
-                    failureCount = 0
-                }
-            }
-        } catch (e: Exception) {
-            failureCount++
-            lastFailureTime = System.currentTimeMillis()
-            
-            if (failureCount >= failureThreshold) {
-                state = CircuitState.OPEN
-            }
-            throw e
-        }
-    }
-}
-```
-
----
-
 ### Enhancement 9: Add Rate Limiting for Identification
 **Priority**: MEDIUM
-
-```kotlin
-class IdentificationRateLimiter(
-    private val maxRequestsPerMinute: Int = 60,
-    private val maxRequestsPerPatient: Int = 10
-) {
-    private val globalRequests = LinkedList<Long>()
-    private val patientRequests = mutableMapOf<String, LinkedList<Long>>()
-    
-    fun canPerformIdentification(patientUuid: String? = null): Boolean {
-        val now = System.currentTimeMillis()
-        val oneMinuteAgo = now - 60000
-        
-        // Clean old requests
-        globalRequests.removeAll { it < oneMinuteAgo }
-        
-        // Check global limit
-        if (globalRequests.size >= maxRequestsPerMinute) return false
-        
-        // Check per-patient limit
-        if (patientUuid != null) {
-            val patientReqs = patientRequests.getOrPut(patientUuid) { LinkedList() }
-            patientReqs.removeAll { it < oneMinuteAgo }
-            if (patientReqs.size >= maxRequestsPerPatient) return false
-            patientReqs.add(now)
-        }
-        
-        globalRequests.add(now)
-        return true
-    }
-}
-```
-
----
 
 ### Enhancement 10: Add Real-time Monitoring Dashboard
 **Priority**: LOW
 
-```kotlin
-data class BiometricMetrics(
-    val timestamp: Date,
-    val verificationSuccessRate: Double,
-    val identificationSuccessRate: Double,
-    val averageSearchTime: Long,
-    val averageQuality: Int,
-    val failedAttempts: Int,
-    val totalAttempts: Int
-)
-
-class BiometricMetricsCollector {
-    suspend fun getMetricsForPeriod(
-        startTime: Date,
-        endTime: Date
-    ): BiometricMetrics {
-        val attempts = getAttemptsInPeriod(startTime, endTime)
-        
-        return BiometricMetrics(
-            timestamp = Date(),
-            verificationSuccessRate = attempts
-                .filter { it.operationType == "VERIFY" }
-                .let { if (it.isEmpty()) 0.0 else it.count { v -> v.success }.toDouble() / it.size },
-            identificationSuccessRate = attempts
-                .filter { it.operationType == "IDENTIFY" }
-                .let { if (it.isEmpty()) 0.0 else it.count { v -> v.success }.toDouble() / it.size },
-            averageSearchTime = attempts
-                .filter { it.operationType == "IDENTIFY" }
-                .map { it.durationMs }
-                .average()
-                .toLong(),
-            averageQuality = attempts.map { it.quality }.average().toInt(),
-            failedAttempts = attempts.count { !it.success },
-            totalAttempts = attempts.size
-        )
-    }
-}
-```
-
----
-
 ### Enhancement 11: Add Network Resilience
 **Priority**: MEDIUM
 
-```kotlin
-class BiometricSyncManager(
-    private val maxRetries: Int = 3,
-    private val retryBackoffMs: Long = 1000
-) {
-    suspend fun syncBiometricsWithRetry(
-        patients: List<Patient>,
-        facilityId: Long
-    ): SyncResult {
-        var lastException: Exception? = null
-        
-        repeat(maxRetries) { attempt ->
-            try {
-                return syncBiometrics(patients, facilityId)
-            } catch (e: IOException) {
-                lastException = e
-                Log.w(TAG, "Sync attempt ${attempt + 1} failed: ${e.message}")
-                
-                if (attempt < maxRetries - 1) {
-                    delay(retryBackoffMs * (attempt + 1))
-                }
-            }
-        }
-        
-        return SyncResult.Error(lastException?.message ?: "Unknown error")
-    }
-}
-```
-
----
-
 ### Enhancement 12: Add Secure Template Storage Encryption
 **Priority**: MEDIUM
-
-```kotlin
-class SecureTemplateStorage(private val context: Context) {
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    
-    fun storeEncryptedTemplate(
-        template: ByteArray,
-        personUuid: String
-    ): EncryptedTemplate {
-        val cipher = Cipher.getInstance(KeyProperties.KEY_ALGORITHM_AES + "/" +
-                KeyProperties.BLOCK_MODE_GCM + "/" +
-                KeyProperties.ENCRYPTION_PADDING_NONE)
-        
-        val key = getOrCreateKey()
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        
-        val encryptedData = cipher.doFinal(template)
-        val iv = cipher.iv
-        
-        return EncryptedTemplate(
-            encryptedData = encryptedData,
-            iv = iv,
-            personUuid = personUuid,
-            timestamp = Date()
-        )
-    }
-    
-    private fun getOrCreateKey(): Key {
-        if (keyStore.containsAlias("biometric_key")) {
-            return keyStore.getKey("biometric_key", null)
-        }
-        
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            .apply {
-                init(KeyGenParameterSpec.Builder(
-                    "biometric_key",
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build())
-            }
-            .generateKey()
-    }
-}
-```
 
 ---
 
@@ -948,55 +504,18 @@ class SecureTemplateStorage(private val context: Context) {
 
 ## Testing Recommendations
 
-```kotlin
-class BiometricEnhancementTests {
-    
-    @Test
-    fun testImprovedScoreComputation() {
-        // Test that score accounts for distance/angle errors
-        val matcher = FingerprintMatcher()
-        
-        // Same template should score highest
-        val template = generateTestTemplate()
-        val result1 = matcher.match(template, template)
-        assertEquals(100.0, result1.score, 1.0)
-        
-        // Slightly rotated template should score lower but still match
-        val rotated = rotateTemplate(template, 15)
-        val result2 = matcher.match(template, rotated)
-        assertTrue(result2.score in 50.0..99.0)
-        
-        // Completely different template should score very low
-        val different = generateDifferentTemplate()
-        val result3 = matcher.match(template, different)
-        assertTrue(result3.score < 30.0)
-    }
-    
-    @Test
-    fun testProgressiveMatching() {
-        // Test early termination
-        val templates = generateTestTemplates(1000)
-        val startTime = System.currentTimeMillis()
-        
-        val result = findBestAlignmentProgressive(templates[0], templates.drop(1))
-        val duration = System.currentTimeMillis() - startTime
-        
-        // Should complete in < 5 seconds
-        assertTrue(duration < 5000)
-    }
-}
-```
+Comprehensive unit tests should verify:
+1. Score computation accounts for distance/angle errors
+2. Progressive matching completes within timeout
+3. Concurrent operations are properly synchronized
+4. Template parsing correctly extracts minutiae types
+5. Spurious minutiae removal is bidirectional
 
 ---
 
 ## Conclusion
 
-These enhancements will transform the biometric system from a **working prototype** to a **production-grade** system ready for HIV/AIDS and public health deployment. Priority should be given to:
-
-1. **Immediate**: Fix Critical Issues (1, 5, 3)
-2. **Short-term**: Implement Enhancement 1 (Progressive Matching)
-3. **Medium-term**: Resolve remaining issues and implement rate limiting
-4. **Long-term**: Add monitoring and advanced features
+These enhancements will transform the biometric system from a working prototype to a production-grade system ready for HIV/AIDS and public health deployment.
 
 ---
 
