@@ -32,8 +32,8 @@ class FingerprintMatcher {
         private const val MAX_ROTATION_TOLERANCE = 45        // degrees
         private const val MAX_TRANSLATION_TOLERANCE = 100     // pixels
         private const val MINUTIAE_DISTANCE_THRESHOLD = 10    // pixels (Euclidean)
-        private const val MINUTIAE_ANGLE_TOLERANCE = 15       // degrees
-        private const val MIN_MINUTIAE_MATCHES = 6            // Minimum matches required
+        private const val MINUTIAE_ANGLE_TOLERANCE = 12       // degrees — tightened from 15 to reduce false positives
+        private const val MIN_MINUTIAE_MATCHES = 8            // Minimum matches required — raised from 6
 
         // Scoring weights (based on NIST recommendations)
         private const val DISTANCE_WEIGHT = 0.4
@@ -44,9 +44,9 @@ class FingerprintMatcher {
         // Coarse rotation steps tried first; fine-grain only when needed
         private val ROTATION_STEPS = listOf(0, -15, 15, -30, 30, -45, 45)
 
-        // Thresholds for different operations (aligned to SecuGenSecurityLevel.SL_HIGH)
-        private const val VERIFICATION_THRESHOLD = 55.0       // 1:1 verification (MIN_VERIFY)
-        private const val IDENTIFICATION_THRESHOLD = 50.0      // 1:N identification
+        // Thresholds for different operations — set conservatively to minimise false identifications
+        private const val VERIFICATION_THRESHOLD = 65.0       // 1:1 verification
+        private const val IDENTIFICATION_THRESHOLD = 62.0     // 1:N identification — raised from 50
         private const val ENROLLMENT_THRESHOLD = 60.0         // Enrollment quality check
     }
 

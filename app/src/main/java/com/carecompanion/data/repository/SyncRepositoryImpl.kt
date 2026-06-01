@@ -60,6 +60,11 @@ class SyncRepositoryImpl @Inject constructor(
         private const val MIN_TEMPLATE_BYTES = 128
         private const val MIN_QUALITY_THRESHOLD = 40
         private const val BLOCK_SIZE = 64
+        // Identification accuracy: minimum score and minimum gap over the next-best patient.
+        // Without a confidence gap, the system returns the "best guess" even when two patients
+        // score similarly — that is the primary cause of wrong-patient identification.
+        private const val IDENTIFICATION_MIN_SCORE = 0.62    // 62/100 hard floor (matches FingerprintMatcher.IDENTIFICATION_THRESHOLD)
+        private const val IDENTIFICATION_CONFIDENCE_GAP = 0.12 // best patient must outscore 2nd-best patient by this margin
 
         /**
          * Checks for biometrics missing hashes or required metadata and backfills hashes using the current hashing method.
@@ -1072,14 +1077,13 @@ class SyncRepositoryImpl @Inject constructor(
         val start = System.currentTimeMillis()
         val canonicalCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
         val allBiometrics = biometricDao.getAllBiometrics()
-        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
 
         var bestMatch: Biometric? = null
         var bestScore = 0.0
+        // Highest score achieved by any template belonging to a DIFFERENT patient than bestMatch.
+        // Used to enforce a confidence gap: if two patients score similarly, we must not guess.
+        var bestScoreOtherPatient = 0.0
 
-        // Chunked processing with per-chunk timeout protection (Issue 4 fix):
-        // Search in chunks of IDENTIFICATION_CHUNK_SIZE so the search can be
-        // cancelled and progress reported without hanging the UI for large DBs.
         val CHUNK_SIZE = 500
         val SEARCH_TIMEOUT_MS = 30_000L  // 30 seconds hard cap for entire 1:N search
         outer@ for (chunk in allBiometrics.chunked(CHUNK_SIZE)) {
@@ -1090,16 +1094,38 @@ class SyncRepositoryImpl @Inject constructor(
             }
             for (bio in chunk) {
                 val score = compareTemplates(canonicalCaptured, bio.template)
-                if (score > bestScore && score >= matchThreshold) {
+                if (score > bestScore) {
+                    // Old best-patient's score is now a competitor from a different patient
+                    if (bestMatch != null && bestMatch.personUuid != bio.personUuid) {
+                        if (bestScore > bestScoreOtherPatient) bestScoreOtherPatient = bestScore
+                    }
                     bestScore = score
                     bestMatch = bio
-                    // Early exit: perfect hash-level match
-                    if (bestScore >= 99.9) break@outer
+                    if (bestScore >= 0.999) break@outer  // perfect / hash-level match
+                } else if (bio.personUuid != bestMatch?.personUuid && score > bestScoreOtherPatient) {
+                    // Track best score from a patient other than current leader
+                    bestScoreOtherPatient = score
                 }
             }
         }
 
         val duration = System.currentTimeMillis() - start
+
+        // Reject if score is below the hard floor
+        if (bestMatch == null || bestScore < IDENTIFICATION_MIN_SCORE) {
+            Log.w(TAG, "identifyBiometric: no match above floor (best=$bestScore, floor=$IDENTIFICATION_MIN_SCORE)")
+            bestMatch = null
+            bestScore = 0.0
+        }
+        // Reject if another patient's best score is too close — ambiguous result is not a result
+        else if (bestScore - bestScoreOtherPatient < IDENTIFICATION_CONFIDENCE_GAP) {
+            Log.w(TAG, "identifyBiometric: ambiguous match rejected " +
+                "(best=${String.format("%.3f", bestScore)} vs otherBest=${String.format("%.3f", bestScoreOtherPatient)}, " +
+                "gap=${String.format("%.3f", bestScore - bestScoreOtherPatient)} < required $IDENTIFICATION_CONFIDENCE_GAP)")
+            bestMatch = null
+            bestScore = 0.0
+        }
+
         com.carecompanion.biometric.BiometricAuditLogger.logIdentification(
             matchedPatientUuid = bestMatch?.personUuid,
             fingerType = bestMatch?.biometricType ?: "UNKNOWN",
