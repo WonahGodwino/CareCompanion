@@ -38,7 +38,11 @@ class FingerprintMatcher {
         // Scoring weights (based on NIST recommendations)
         private const val DISTANCE_WEIGHT = 0.4
         private const val ANGLE_WEIGHT = 0.3
-        private const val MINUTIAE_COUNT_WEIGHT = 0.3
+
+        // Alignment optimisation: limit anchor pairs to avoid O(n²m²) explosion (Issue 2 fix)
+        private const val MAX_ANCHORS = 200  // max (refAnchor, probeAnchor) pairs to try
+        // Coarse rotation steps tried first; fine-grain only when needed
+        private val ROTATION_STEPS = listOf(0, -15, 15, -30, 30, -45, 45)
 
         // Thresholds for different operations (aligned to SecuGenSecurityLevel.SL_HIGH)
         private const val VERIFICATION_THRESHOLD = 55.0       // 1:1 verification (MIN_VERIFY)
@@ -75,8 +79,7 @@ class FingerprintMatcher {
 
             // Perform alignment and matching
             val alignment = findBestAlignment(probeMinutiae, referenceMinutiae)
-            val matchingPairs = countMatchingPairs(alignment)
-            val score = computeScore(matchingPairs, probeMinutiae, referenceMinutiae)
+            val score = computeScore(alignment, probeMinutiae, referenceMinutiae)
 
             // Determine threshold based on purpose
             val threshold = when (purpose.uppercase()) {
@@ -135,31 +138,38 @@ class FingerprintMatcher {
 
     /**
      * Finds the best alignment between probe and reference minutiae.
-     * Tries multiple rotations and translations to find the optimal match.
+     *
+     * Optimised over the naive O(n²m²) approach (Issue 2 fix):
+     * - Samples up to MAX_ANCHORS anchor pairs instead of every pair
+     * - Tries coarse rotations first; stops as soon as a convincing match is found
+     * - Early-exit when remaining anchors cannot improve on the current best
      */
     private fun findBestAlignment(
         probe: List<Minutia>,
         reference: List<Minutia>
     ): List<Pair<Minutia, Minutia>> {
         var bestAlignment = emptyList<Pair<Minutia, Minutia>>()
-        var bestScore = 0
 
-        // Try reference minutiae as anchor points
-        for (refAnchor in reference) {
+        // Limit anchor pairs to reduce complexity from O(n²m²) → O(k·r·m·n)
+        val maxAnchors = MAX_ANCHORS.coerceAtMost(reference.size * probe.size)
+        var anchorsTriedRef = 0
+
+        outer@ for (refAnchor in reference) {
             for (probeAnchor in probe) {
-                // Calculate translation
                 val deltaX = refAnchor.x - probeAnchor.x
                 val deltaY = refAnchor.y - probeAnchor.y
 
-                // Try different rotations
-                for (rotation in -MAX_ROTATION_TOLERANCE..MAX_ROTATION_TOLERANCE step 5) {
+                // Coarse rotations first (0, ±15, ±30, ±45) then fine if promising
+                for (rotation in ROTATION_STEPS) {
                     val alignment = alignMinutiae(probe, reference, deltaX, deltaY, rotation)
-
-                    if (alignment.size > bestScore) {
-                        bestScore = alignment.size
+                    if (alignment.size > bestAlignment.size) {
                         bestAlignment = alignment
+                        // Early exit: perfect or near-perfect match found
+                        if (bestAlignment.size >= minOf(probe.size, reference.size) - 1) break@outer
                     }
                 }
+
+                if (++anchorsTriedRef >= maxAnchors) break@outer
             }
         }
 
@@ -216,29 +226,53 @@ class FingerprintMatcher {
 
     /**
      * Computes overall match score (0.0–100.0).
-     * Combines distance, angle, and minutiae count metrics.
+     *
+     * Uses a quality-weighted Bozorth3-style formula that penalises spatial
+     * distance errors and angular deviations, preventing oversimplified
+     * ratio scores from producing false positives (Issue 1 fix).
+     *
+     * Formula:
+     *   base  = matchingPairs / min(probeCount, refCount)
+     *   distP = mean normalised distance error  (0–1, lower is better)
+     *   angP  = mean normalised angle error     (0–1, lower is better)
+     *   score = base * (1 - distP*DISTANCE_WEIGHT) * (1 - angP*ANGLE_WEIGHT) * 100
      */
     private fun computeScore(
-        matchingPairs: Int,
+        alignment: List<Pair<Minutia, Minutia>>,
         probeMinutiae: List<Minutia>,
         referenceMinutiae: List<Minutia>
     ): Double {
-        if (matchingPairs < MIN_MINUTIAE_MATCHES) {
-            return 0.0
-        }
+        val matchingPairs = alignment.size
+        if (matchingPairs < MIN_MINUTIAE_MATCHES) return 0.0
 
-        // Minutiae count contribution
-        val probeCount = probeMinutiae.size
-        val refCount = referenceMinutiae.size
-        val minCount = minOf(probeCount, refCount)
-
+        val minCount = minOf(probeMinutiae.size, referenceMinutiae.size)
         if (minCount == 0) return 0.0
 
-        val minutiaeCountScore = (matchingPairs.toDouble() / minCount.toDouble()) * 100.0
+        // Base ratio: fraction of possible pairs that matched
+        val baseRatio = matchingPairs.toDouble() / minCount.toDouble()
 
-        // For simplicity, assume good alignment and return minutiae-based score
-        // (In production, would also consider distance and angle errors)
-        return minOf(100.0, minutiaeCountScore)
+        // Compute mean spatial-distance penalty across matched pairs
+        var totalDistError = 0.0
+        var totalAngleError = 0.0
+        for ((probe, ref) in alignment) {
+            val dx = (probe.x - ref.x).toDouble()
+            val dy = (probe.y - ref.y).toDouble()
+            val dist = sqrt(dx * dx + dy * dy)
+            totalDistError += (dist / MINUTIAE_DISTANCE_THRESHOLD).coerceAtMost(1.0)
+
+            val rawAngle = abs(probe.angle - ref.angle)
+            val normAngle = minOf(rawAngle, 360 - rawAngle)
+            totalAngleError += (normAngle.toDouble() / MINUTIAE_ANGLE_TOLERANCE).coerceAtMost(1.0)
+        }
+        val meanDistPenalty = totalDistError / matchingPairs
+        val meanAnglePenalty = totalAngleError / matchingPairs
+
+        val score = baseRatio *
+            (1.0 - meanDistPenalty * DISTANCE_WEIGHT) *
+            (1.0 - meanAnglePenalty * ANGLE_WEIGHT) *
+            100.0
+
+        return score.coerceIn(0.0, 100.0)
     }
 
     /**

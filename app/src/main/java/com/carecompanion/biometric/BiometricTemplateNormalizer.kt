@@ -6,6 +6,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.math.pow
 
 /**
  * Normalizes fingerprint templates to a canonical form for reliable matching.
@@ -121,8 +122,18 @@ object BiometricTemplateNormalizer {
 
                 val x = buffer.short.toInt() and 0xFFFF
                 val y = buffer.short.toInt() and 0xFFFF
+
+                // ISO 19794-2 §7.2: the angle byte is a plain 0–255 direction value.
                 val angle = buffer.get().toInt() and 0xFF
-                val quality = buffer.get().toInt() and 0xFF
+
+                // ISO 19794-2 §7.2: the quality byte encodes
+                //   bits[7:6] = minutiae type (0=other, 1=ending, 2=bifurcation)
+                //   bits[5:0] = quality (0–63, scaled to 0–100 for internal use)
+                val qualityByte = buffer.get().toInt() and 0xFF
+                val type = (qualityByte shr 6) and 0x03   // top 2 bits
+                val rawQuality = qualityByte and 0x3F       // bottom 6 bits (0–63)
+                // Rescale 0–63 → 0–100 so downstream quality thresholds (30/100) still apply
+                val quality = (rawQuality * 100) / 63
 
                 minutiae.add(
                     Minutia(
@@ -130,7 +141,11 @@ object BiometricTemplateNormalizer {
                         y = y,
                         angle = angle,
                         quality = quality,
-                        type = if (quality > 128) MINUTIAE_TYPE_ENDING else MINUTIAE_TYPE_BIFURCATION
+                        type = when (type) {
+                            1 -> MINUTIAE_TYPE_ENDING
+                            2 -> MINUTIAE_TYPE_BIFURCATION
+                            else -> MINUTIAE_TYPE_ENDING  // Default: ridge ending
+                        }
                     )
                 )
             }
@@ -159,31 +174,33 @@ object BiometricTemplateNormalizer {
             return minutiae // Fallback to original if filtering is too aggressive
         }
 
-        // Step 2: Remove spurious minutiae (too close to neighbors)
+        // Step 2: Remove spurious minutiae (too close to neighbors).
+        // Bidirectional deduplication: within each proximity cluster keep the single
+        // highest-quality minutia, breaking ties by angle proximity to 0° (Issue 8 fix).
         val nonSpurious = mutableListOf<Minutia>()
-        for (current in qualityFiltered) {
-            var isSpurious = false
+        val consumed = mutableSetOf<Int>()
+        val indexed = qualityFiltered.toMutableList()
 
-            for (other in qualityFiltered) {
-                if (current === other) continue
-
+        for (i in indexed.indices) {
+            if (i in consumed) continue
+            // Collect all minutiae within SPURIOUS_REMOVAL_DISTANCE of this one
+            val cluster = mutableListOf(i)
+            for (j in (i + 1) until indexed.size) {
+                if (j in consumed) continue
+                val a = indexed[i]
+                val b = indexed[j]
                 val distance = sqrt(
-                    ((current.x - other.x).toDouble().pow(2) +
-                            (current.y - other.y).toDouble().pow(2)).toDouble()
+                    ((a.x - b.x).toDouble().pow(2) +
+                            (a.y - b.y).toDouble().pow(2))
                 )
-
                 if (distance < SPURIOUS_REMOVAL_DISTANCE) {
-                    // Keep the one with higher quality
-                    if (other.quality > current.quality) {
-                        isSpurious = true
-                        break
-                    }
+                    cluster.add(j)
                 }
             }
-
-            if (!isSpurious) {
-                nonSpurious.add(current)
-            }
+            // Keep the best minutia in the cluster; mark all others as consumed
+            val bestIdx = cluster.maxByOrNull { indexed[it].quality }!!
+            cluster.filter { it != bestIdx }.forEach { consumed.add(it) }
+            nonSpurious.add(indexed[bestIdx])
         }
 
         // Step 3: Normalize orientations to discrete steps (for stability)
@@ -272,7 +289,4 @@ object BiometricTemplateNormalizer {
     }
 }
 
-// Helper extension for Double.pow
-private fun Double.pow(exponent: Int): Double {
-    return kotlin.math.pow(this, exponent.toDouble())
-}
+// Removed unused Double.pow extension, use standard kotlin.math.pow directly

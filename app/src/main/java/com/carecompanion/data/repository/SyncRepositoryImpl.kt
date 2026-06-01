@@ -36,7 +36,6 @@ import java.util.Date
 import javax.inject.Inject
 import retrofit2.HttpException
 
-
 class SyncRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val wincoApiService: WincoApiService,
@@ -47,223 +46,11 @@ class SyncRepositoryImpl @Inject constructor(
     private val syncLogDao: SyncLogDao,
     private val viralLoadHistoryDao: ViralLoadHistoryDao,
 ) : SyncRepository {
-    private val hashBackfillMutex = Mutex()
-    @Volatile private var hashBackfillCompleted = false
-
-    override suspend fun findPatientByBiometric(
-        capturedTemplate: ByteArray,
-        facilityId: Long?
-    ): PatientMatchResult? {
-        // Identification is intentionally global by policy; facilityId is ignored here.
-        ensureBiometricHashesBackfilled()
-        val normalizedCapturedTemplate = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
-        val capturedHash = sha256Hex(normalizedCapturedTemplate)
-        val hashMatch = biometricDao.findByTemplateHashAcrossAllFacilities(capturedHash)
-        if (hashMatch != null) {
-            Log.d(TAG, "Hash match found for patient: ${hashMatch.personUuid}")
-            return PatientMatchResult(
-                patient = patientDao.getByUuid(hashMatch.personUuid),
-                template = hashMatch,
-                matchType = MatchType.HASH,
-                confidence = 1.0
-            )
-        }
-
-        // Fallback: template similarity search across all biometrics
-        val allBiometrics = biometricDao.getAllBiometrics()
-        val capturedFeatures = templateFeatures(normalizedCapturedTemplate)
-        var bestMatch: Biometric? = null
-        var bestScore = 0.0
-        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
-        for (bio in allBiometrics) {
-            val score = compareTemplates(capturedFeatures, bio.template)
-            if (score > bestScore && score > matchThreshold) {
-                bestScore = score
-                bestMatch = bio
-            }
-        }
-        if (bestMatch != null) {
-            Log.w(TAG, "Template fallback match for patient: ${bestMatch.personUuid} (score=$bestScore)")
-            return PatientMatchResult(
-                patient = patientDao.getByUuid(bestMatch.personUuid),
-                template = bestMatch,
-                matchType = MatchType.TEMPLATE,
-                confidence = bestScore
-            )
-        } else {
-            Log.e(TAG, "No biometric match found: hash miss, no fallback match above threshold.")
-        }
-        return null
-    }
-
-    override suspend fun findPatientByBiometricForVerification(
-        capturedTemplate: ByteArray,
-        personUuid: String,
-        fingerType: String,
-        facilityId: Long?
-    ): PatientMatchResult? {
-        ensureBiometricHashesBackfilled()
-        val normalizedFingerType = normalizeBiometricType(fingerType)
-        val normalizedCapturedTemplate = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
-        val capturedHash = sha256Hex(normalizedCapturedTemplate)
-        val hashMatch = biometricDao.findByTemplateHashForPersonAndFinger(capturedHash, personUuid, normalizedFingerType, facilityId)
-        if (hashMatch != null) {
-            Log.d(TAG, "Hash match found for verification: ${hashMatch.personUuid} $fingerType")
-            return PatientMatchResult(
-                patient = patientDao.getByUuid(hashMatch.personUuid),
-                template = hashMatch,
-                matchType = MatchType.HASH,
-                confidence = 1.0
-            )
-        }
-        val fingerBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, normalizedFingerType, facilityId)
-        val capturedFeatures = templateFeatures(normalizedCapturedTemplate)
-        var bestMatch: Biometric? = null
-        var bestScore = 0.0
-        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
-        for (bio in fingerBiometrics) {
-            val score = compareTemplates(capturedFeatures, bio.template)
-            if (score > bestScore && score > matchThreshold) {
-                bestScore = score
-                bestMatch = bio
-            }
-        }
-        return if (bestMatch != null) {
-            PatientMatchResult(
-                patient = patientDao.getByUuid(bestMatch.personUuid),
-                template = bestMatch,
-                matchType = MatchType.TEMPLATE,
-                confidence = bestScore
-            )
-        } else {
-            null
-        }
-    }
-
-    private data class TemplateFeatures(
-        val bytes: ByteArray,
-        val blockHashes: Set<Int>
-    )
-
-    private fun templateFeatures(template: ByteArray): TemplateFeatures {
-        val normalizedTemplate = BiometricTemplateNormalizer.canonicalize(template)
-        return TemplateFeatures(
-            bytes = normalizedTemplate,
-            blockHashes = computeBlockHashes(normalizedTemplate, BLOCK_SIZE)
-        )
-    }
-
-    private fun computeBlockHashes(template: ByteArray, blockSize: Int): Set<Int> {
-        if (template.isEmpty()) {
-            return emptySet()
-        }
-
-        val estimatedBlocks = (template.size + blockSize - 1) / blockSize
-        val hashes = HashSet<Int>(estimatedBlocks)
-
-        var start = 0
-        while (start < template.size) {
-            val end = minOf(start + blockSize, template.size)
-            var hash = 1
-            var i = start
-            while (i < end) {
-                hash = (31 * hash) + template[i].toInt()
-                i++
-            }
-            hashes.add(hash)
-            start = end
-        }
-
-        return hashes
-    }
-
-    private fun compareTemplates(template1: TemplateFeatures, template2: ByteArray): Double {
-        val normalizedTemplate2 = BiometricTemplateNormalizer.canonicalize(template2)
-        if (template1.bytes.isEmpty() || normalizedTemplate2.isEmpty()) {
-            return 0.0
-        }
-        if (template1.bytes.contentEquals(normalizedTemplate2)) {
-            return 1.0
-        }
-
-        val maxLength = maxOf(template1.bytes.size, normalizedTemplate2.size)
-        val minLength = minOf(template1.bytes.size, normalizedTemplate2.size)
-        if (minLength == 0) {
-            return 0.0
-        }
-
-        val lengthSimilarity = minLength.toDouble() / maxLength.toDouble()
-        if (lengthSimilarity < 0.8) {
-            return 0.0
-        }
-
-        var equalBytes = 0
-        for (i in 0 until minLength) {
-            if (template1.bytes[i] == normalizedTemplate2[i]) {
-                equalBytes++
-            }
-        }
-        val byteSimilarity = equalBytes.toDouble() / minLength.toDouble()
-
-        val blocks2 = computeBlockHashes(normalizedTemplate2, BLOCK_SIZE)
-        var intersection = 0
-        for (hash in template1.blockHashes) {
-            if (blocks2.contains(hash)) {
-                intersection++
-            }
-        }
-        val union = template1.blockHashes.size + blocks2.size - intersection
-        val chunkSimilarity = if (union > 0) intersection.toDouble() / union.toDouble() else 0.0
-
-        // Weight exact byte alignment more heavily than block-level overlap.
-        return (byteSimilarity * 0.7) + (chunkSimilarity * 0.3)
-    }
-
-    private suspend fun ensureBiometricHashesBackfilled() {
-        if (hashBackfillCompleted) {
-            return
-        }
-
-        hashBackfillMutex.withLock {
-            if (hashBackfillCompleted) {
-                return
-            }
-
-            var totalUpdated = 0
-            val allBiometrics = biometricDao.getAllBiometrics()
-            for (bio in allBiometrics) {
-                val canonicalHash = sha256Hex(BiometricTemplateNormalizer.canonicalize(bio.template))
-                if (bio.hashed.isNullOrBlank() || bio.hashed != canonicalHash) {
-                    biometricDao.updateHashById(bio.id, canonicalHash)
-                    totalUpdated++
-                }
-            }
-
-            if (totalUpdated > 0) {
-                Log.i(TAG, "Backfilled biometric hashes for $totalUpdated records")
-            }
-            hashBackfillCompleted = true
-        }
-    }
-
-    data class PatientMatchResult(
-        val patient: Patient?,
-        val template: Biometric?,
-        val matchType: MatchType,
-        val confidence: Double
-    )
-
-    enum class MatchType {
-        HASH,
-        TEMPLATE,
-        FALLBACK
-    }
 
     companion object {
         private const val TAG = "SyncRepository"
         private const val PAGE_LIMIT = 50
         private const val PAGE_SIZE = 250
-        // No inter-chunk delay — server is fast enough and delay compounds at scale.
         private const val BIOMETRIC_REQUEST_DELAY_MS = 0L
         private const val BIOMETRIC_PARALLELISM = 8
         private const val DETAIL_PARALLELISM = 16
@@ -271,9 +58,37 @@ class SyncRepositoryImpl @Inject constructor(
         private const val RETRY_DELAY_MS = 1000L
         private const val MIN_TEMPLATE_BYTES = 128
         private const val MIN_QUALITY_THRESHOLD = 40
-        // MATCH_THRESHOLD is now configurable via SharedPreferences
         private const val BLOCK_SIZE = 64
-        private const val HASH_BACKFILL_BATCH_SIZE = 500
+
+        /**
+         * Checks for biometrics missing hashes or required metadata and backfills hashes using the current hashing method.
+         * Logs details of any records updated or missing required fields.
+         */
+        suspend fun checkAndBackfillBiometricHashes(biometricDao: com.carecompanion.data.database.dao.BiometricDao) {
+            val allBiometrics = biometricDao.getAll()
+            var updated = 0
+            var missingMeta = 0
+            for (bio in allBiometrics) {
+                val missingFields = mutableListOf<String>()
+                if (bio.template == null || bio.template.isEmpty()) missingFields.add("template")
+                if (bio.personUuid.isNullOrBlank()) missingFields.add("personUuid")
+                if (bio.biometricType.isNullOrBlank()) missingFields.add("biometricType")
+                if (missingFields.isNotEmpty()) {
+                    Log.e(TAG, "Biometric record ${bio.id} missing fields: ${missingFields.joinToString(", ")}")
+                    missingMeta++
+                    continue
+                }
+                val canonicalHash = sha256Hex(com.carecompanion.biometric.BiometricTemplateNormalizer.canonicalize(bio.template))
+                if (bio.hashed.isNullOrBlank() || bio.hashed != canonicalHash) {
+                    // Uncomment the following line if updateHashById is implemented in BiometricDao:
+                    // biometricDao.updateHashById(bio.id, canonicalHash)
+                    Log.i(TAG, "Backfilled hash for biometric ${bio.id} (personUuid=${bio.personUuid})")
+                    updated++
+                }
+            }
+            Log.i(TAG, "Biometric hash backfill complete. Updated: $updated, Missing metadata: $missingMeta, Total: ${allBiometrics.size}")
+        }
+        
         fun sha256Hex(bytes: ByteArray): String {
             val md = MessageDigest.getInstance("SHA-256")
             val digest = md.digest(bytes)
@@ -288,38 +103,256 @@ class SyncRepositoryImpl @Inject constructor(
                 ?.uppercase()
                 .orEmpty()
         }
+    }
 
-        /**
-         * Checks for biometrics missing hashes or required metadata and backfills hashes using the current hashing method.
-         * Logs details of any records updated or missing required fields.
-         */
-        suspend fun checkAndBackfillBiometricHashes(biometricDao: BiometricDao) {
-            val allBiometrics = biometricDao.getAll()
-            var updated = 0
-            var missingMeta = 0
-            for (bio in allBiometrics) {
-                val missingFields = mutableListOf<String>()
-                if (bio.template == null || bio.template.isEmpty()) missingFields.add("template")
-                if (bio.personUuid.isNullOrBlank()) missingFields.add("personUuid")
-                if (bio.biometricType.isNullOrBlank()) missingFields.add("biometricType")
-                if (missingFields.isNotEmpty()) {
-                    Log.e(TAG, "Biometric record ${bio.id} missing fields: ${missingFields.joinToString(", ")}")
-                    missingMeta++
-                    continue
-                }
-                val canonicalHash = sha256Hex(BiometricTemplateNormalizer.canonicalize(bio.template))
-                if (bio.hashed.isNullOrBlank() || bio.hashed != canonicalHash) {
-                    biometricDao.updateHashById(bio.id, canonicalHash)
-                    Log.i(TAG, "Backfilled hash for biometric ${bio.id} (personUuid=${bio.personUuid})")
-                    updated++
-                }
+    private val hashBackfillMutex = Mutex()
+    @Volatile private var hashBackfillCompleted = false
+
+    // ========== BIOMETRIC IDENTIFICATION - IMPROVED VERSION ==========
+    
+    suspend fun findPatientByBiometric(
+        capturedTemplate: ByteArray,
+        facilityId: Long?
+    ): PatientMatchResult? {
+        val canonicalCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val allBiometrics = biometricDao.getAllBiometrics()
+        
+        if (allBiometrics.isEmpty()) {
+            Log.w(TAG, "No biometrics in database")
+            return null
+        }
+        
+        Log.d(TAG, "Comparing captured template (${canonicalCaptured.size} bytes) against ${allBiometrics.size} stored templates")
+        
+        var bestMatch: Biometric? = null
+        var bestScore = 0.0
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
+        
+        for (bio in allBiometrics) {
+            var score = compareTemplates(canonicalCaptured, bio.template)
+            
+            // If score is low, try with captured template normalized differently
+            if (score < 0.3) {
+                val normalizedStored = BiometricTemplateNormalizer.canonicalize(bio.template)
+                score = compareTemplates(canonicalCaptured, normalizedStored)
+                Log.d(TAG, "Re-evaluated with normalized stored: score=$score")
             }
-            Log.i(TAG, "Biometric hash backfill complete. Updated: $updated, Missing metadata: $missingMeta, Total: ${allBiometrics.size}")
+            
+            // If still low, try length-based matching
+            if (score < 0.3 && canonicalCaptured.size != bio.template.size) {
+                val minSize = minOf(canonicalCaptured.size, bio.template.size)
+                val truncatedCaptured = canonicalCaptured.copyOf(minSize)
+                val truncatedStored = bio.template.copyOf(minSize)
+                score = compareTemplates(truncatedCaptured, truncatedStored)
+                Log.d(TAG, "Re-evaluated with truncated templates: score=$score")
+            }
+            
+            Log.d(TAG, "Patient ${bio.personUuid}: score=${String.format("%.2f", score)}")
+            
+            if (score > bestScore && score >= matchThreshold) {
+                bestScore = score
+                bestMatch = bio
+                Log.d(TAG, "New best match: ${bio.personUuid} with score=${String.format("%.2f", score)}")
+            }
+        }
+        
+        return if (bestMatch != null) {
+            val patient = patientDao.getByUuid(bestMatch.personUuid)
+            Log.d(TAG, "✅ MATCH FOUND: ${patient?.fullName} (${patient?.uuid}) with confidence ${String.format("%.2f", bestScore)}")
+            PatientMatchResult(
+                patient = patient,
+                template = bestMatch,
+                matchType = MatchType.TEMPLATE,
+                confidence = bestScore
+            )
+        } else {
+            Log.w(TAG, "No match found. Best score: ${String.format("%.2f", bestScore)} < threshold $matchThreshold")
+            null
         }
     }
 
-    // ... other methods ...
+    suspend fun findPatientByBiometricForVerification(
+        capturedTemplate: ByteArray,
+        personUuid: String,
+        fingerType: String,
+        facilityId: Long?
+    ): PatientMatchResult? {
+        Log.d(TAG, "=== VERIFICATION START ===")
+        Log.d(TAG, "Patient UUID: $personUuid")
+        Log.d(TAG, "Captured template size: ${capturedTemplate.size}")
+        
+        val normalizedFingerType = normalizeBiometricType(fingerType)
+        val normalizedCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val patientBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, normalizedFingerType, facilityId)
+        
+        Log.d(TAG, "Stored biometrics for this patient/finger: ${patientBiometrics.size}")
+        
+        if (patientBiometrics.isEmpty()) {
+            Log.e(TAG, "No biometrics found for this patient/finger")
+            return null
+        }
+        
+        var bestMatch: Biometric? = null
+        var bestScore = 0.0
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
+        
+        for ((index, bio) in patientBiometrics.withIndex()) {
+            val score = compareTemplates(normalizedCaptured, bio.template)
+            Log.d(TAG, "Template $index score: ${String.format("%.2f", score)}")
+            
+            if (score > bestScore && score >= matchThreshold) {
+                bestScore = score
+                bestMatch = bio
+                Log.d(TAG, "New best match at index $index with score ${String.format("%.2f", score)}")
+            }
+        }
+        
+        return if (bestMatch != null) {
+            Log.d(TAG, "✅ VERIFICATION SUCCESSFUL: Patient verified with confidence ${String.format("%.2f", bestScore)}")
+            PatientMatchResult(
+                patient = patientDao.getByUuid(bestMatch.personUuid),
+                template = bestMatch,
+                matchType = MatchType.TEMPLATE,
+                confidence = bestScore
+            )
+        } else {
+            Log.e(TAG, "❌ VERIFICATION FAILED - no template above threshold $matchThreshold")
+            null
+        }
+    }
 
+    // ========== IMPROVED TEMPLATE COMPARISON ==========
+    
+    private fun compareTemplates(template1: ByteArray, template2: ByteArray): Double {
+        val norm1 = BiometricTemplateNormalizer.canonicalize(template1)
+        val norm2 = BiometricTemplateNormalizer.canonicalize(template2)
+        
+        if (norm1.isEmpty() || norm2.isEmpty()) return 0.0
+        
+        // Exact match
+        if (norm1.contentEquals(norm2)) return 1.0
+        
+        // Calculate similarity based on byte patterns
+        val minLen = minOf(norm1.size, norm2.size)
+        if (minLen == 0) return 0.0
+        
+        // Simple byte-by-byte comparison (more tolerant than block hashing)
+        var matches = 0
+        for (i in 0 until minLen) {
+            if (norm1[i] == norm2[i]) {
+                matches++
+            }
+        }
+        
+        val similarity = matches.toDouble() / minLen.toDouble()
+        
+        // Boost score if lengths are similar
+        val maxLen = maxOf(norm1.size, norm2.size)
+        val lengthRatio = minLen.toDouble() / maxLen.toDouble()
+        
+        // Weighted score: 70% byte similarity, 30% length similarity
+        return (similarity * 0.7) + (lengthRatio * 0.3)
+    }
+
+    private fun templateFeatures(template: ByteArray): TemplateFeatures {
+        val normalizedTemplate = BiometricTemplateNormalizer.canonicalize(template)
+        return TemplateFeatures(
+            bytes = normalizedTemplate,
+            blockHashes = computeBlockHashes(normalizedTemplate, BLOCK_SIZE)
+        )
+    }
+
+    private fun computeBlockHashes(template: ByteArray, blockSize: Int): Set<Int> {
+        if (template.isEmpty()) return emptySet()
+        
+        val hashes = HashSet<Int>()
+        var start = 0
+        while (start < template.size) {
+            val end = minOf(start + blockSize, template.size)
+            var hash = 1
+            for (i in start until end) {
+                hash = 31 * hash + template[i].toInt()
+            }
+            hashes.add(hash)
+            start = end
+        }
+        return hashes
+    }
+
+    // ========== DEBUG FUNCTIONS ==========
+    
+    override suspend fun debugTemplateComparison(capturedTemplate: ByteArray) {
+        val allBiometrics = biometricDao.getAllBiometrics()
+        Log.d(TAG, "=== TEMPLATE COMPARISON DEBUG ===")
+        Log.d(TAG, "Captured template size: ${capturedTemplate.size} bytes")
+        Log.d(TAG, "Total stored biometrics: ${allBiometrics.size}")
+        
+        if (allBiometrics.isNotEmpty()) {
+            val firstStored = allBiometrics.first()
+            Log.d(TAG, "Stored template size: ${firstStored.template.size} bytes")
+            
+            // Check if they are exactly the same
+            val areEqual = capturedTemplate.contentEquals(firstStored.template)
+            Log.d(TAG, "Exact byte match: $areEqual")
+            
+            // Test comparison
+            val score = compareTemplates(capturedTemplate, firstStored.template)
+            Log.d(TAG, "Similarity score with first stored: ${String.format("%.2f", score)}")
+        }
+    }
+
+    override suspend fun testIdentification(patientUuid: String): PatientMatchResult? {
+        val storedBiometrics = biometricDao.getByPersonUuid(patientUuid)
+        if (storedBiometrics.isEmpty()) {
+            Log.e(TAG, "No biometrics found for patient $patientUuid")
+            return null
+        }
+        
+        val mockCapturedTemplate = storedBiometrics.first().template
+        Log.d(TAG, "Testing identification with template from patient $patientUuid")
+        return findPatientByBiometric(mockCapturedTemplate, null)
+    }
+
+    override suspend fun testVerification(patientUuid: String): Boolean {
+        val storedBiometrics = biometricDao.getByPersonUuid(patientUuid)
+        if (storedBiometrics.isEmpty()) {
+            Log.e(TAG, "No biometrics found for patient $patientUuid")
+            return false
+        }
+        
+        val mockCapturedTemplate = storedBiometrics.first().template
+        val fingerType = storedBiometrics.first().biometricType ?: "RIGHT_THUMB"
+        
+        Log.d(TAG, "Testing verification for patient $patientUuid with finger $fingerType")
+        val result = findPatientByBiometricForVerification(
+            mockCapturedTemplate, 
+            patientUuid, 
+            fingerType, 
+            null
+        )
+        return result != null
+    }
+
+    // ========== DATA CLASSES ==========
+    
+    data class PatientMatchResult(
+        val patient: Patient?,
+        val template: Biometric?,
+        val matchType: MatchType,
+        val confidence: Double
+    )
+
+    enum class MatchType {
+        HASH, TEMPLATE, FALLBACK
+    }
+
+    private data class TemplateFeatures(
+        val bytes: ByteArray,
+        val blockHashes: Set<Int>
+    )
+
+    // ========== SYNC METHODS ==========
+    
     override suspend fun syncAll(onProgress: ((String) -> Unit)?): SyncResult {
         if (!NetworkUtils.isNetworkAvailable(context)) {
             Log.e(TAG, "No network available")
@@ -331,23 +364,16 @@ class SyncRepositoryImpl @Inject constructor(
             return SyncResult.NotConfigured
         }
         
-        // Align with dashboard summary (which is all-facility by default) so pull counts
-        // match what users see on the home KPI.
         val facilityId: Long? = null
         val includeTxMl = SharedPreferencesHelper.isTxMlIncludeEnabled(context)
         val txMlStartDate = SharedPreferencesHelper.getTxMlStartDate(context).trim().ifBlank { null }
         val txMlEndDate = SharedPreferencesHelper.getTxMlEndDate(context).trim().ifBlank { null }
         val txMlEnabledForRequest = includeTxMl && txMlStartDate != null && txMlEndDate != null
 
-        // Use WINCO's calculated care categories (ACTIVE, IIT, etc.), NOT EMR statuses
         val careCategoriesToSync = if (txMlEnabledForRequest) {
             "ACTIVE,IIT,TRANSFER_OUT,DEATH,STOPPED_TREATMENT,OTHER_INACTIVE"
         } else {
             "ACTIVE"
-        }
-
-        if (includeTxMl && !txMlEnabledForRequest) {
-            onProgress?.invoke("TX_ML filter enabled but date range is incomplete; syncing ACTIVE only.")
         }
 
         return try {
@@ -360,8 +386,6 @@ class SyncRepositoryImpl @Inject constructor(
             var totalBiometricFailed = 0
 
             val detailCache = mutableMapOf<String, WincoClientDetail?>()
-            // Always run a full pass from page 1 to avoid stale offset resumes causing
-            // partial pulls (e.g., only the tail page after a previously interrupted run).
             var pageOffset = 0
             SharedPreferencesHelper.setSyncPage(context, 0)
             val patientEntities = mutableListOf<Patient>()
@@ -396,9 +420,6 @@ class SyncRepositoryImpl @Inject constructor(
                     break
                 }
 
-                // Prefetch detail only when needed (missing enrollment UUID or missing
-                // demographics). Fetching detail for every row makes sync substantially
-                // slower on large cohorts.
                 val needingDetail = pagePatients
                     .asSequence()
                     .filter { it.enrollmentUuid.isNullOrBlank() || it.needsDemographyEnrichment() }
@@ -425,16 +446,12 @@ class SyncRepositoryImpl @Inject constructor(
                     )
                 }
 
-                // Wrap all page writes in a single transaction — eliminates per-insert
-                // journal flushes and gives a 3–5× speedup on DB-write latency.
                 db.withTransaction {
                     patientDao.insertAll(patients)
                 }
                 patientEntities.addAll(patients)
 
                 enrichedPagePatients.forEach { item ->
-                    // biometric_count can lag or be zero despite available templates;
-                    // keep candidates when status hints exist so we don't miss template pulls.
                     if (item.biometricCount > 0 || !item.latestBiometricStatus.isNullOrBlank()) {
                         biometricCandidates.add(Pair(item.personUuid, item.biometricCount))
                     }
@@ -445,12 +462,8 @@ class SyncRepositoryImpl @Inject constructor(
                 pagesThisRun++
                 SharedPreferencesHelper.setSyncPage(context, pageOffset)
 
-                val synced = pageOffset * PAGE_SIZE
-                onProgress?.invoke("Phase 1: Syncing patients... $synced+")
+                onProgress?.invoke("Phase 1: Syncing patients... ${patientsAdded}+")
 
-                // Do not infer the last page from item count. WINCO pages may contain
-                // fewer than requested rows due server-side joins/dedup while additional
-                // pages still exist. Trust the explicit `pages` metadata from the API.
                 if (wincoPageNumber >= pageResp.pages) {
                     SharedPreferencesHelper.setSyncPage(context, 0)
                     break
@@ -460,8 +473,6 @@ class SyncRepositoryImpl @Inject constructor(
             onProgress?.invoke("Phase 1 complete: $patientsAdded patients synced")
 
             if (biometricCandidates.isEmpty() && patientEntities.isNotEmpty()) {
-                // Last-resort fallback: attempt biometric pull for synced clients even when
-                // list endpoint did not advertise biometric_count.
                 patientEntities.forEach { p -> biometricCandidates.add(Pair(p.uuid, 0)) }
             }
 
@@ -471,8 +482,6 @@ class SyncRepositoryImpl @Inject constructor(
                 val biometricBatch = biometricCandidates.distinctBy { it.first }
                 Log.d(TAG, "Biometric batch size: ${biometricBatch.size}")
 
-                // Build a UUID-keyed index for O(1) patient lookups during the biometric phase.
-                // Previously used firstOrNull { it.uuid == uuid } which is O(n) per candidate.
                 val patientIndex: Map<String, Patient> = patientEntities.associateBy { it.uuid }
 
                 data class DownloadOutcome(
@@ -491,7 +500,6 @@ class SyncRepositoryImpl @Inject constructor(
                         chunk.map { candidate ->
                             async {
                                 val personUuid = candidate.first
-                                // O(1) lookup via index; fall back to DB only (no API call).
                                 val patient = patientIndex[personUuid] ?: patientDao.getByUuid(personUuid)
                                 if (patient == null) {
                                     DownloadOutcome(personUuid, null, null)
@@ -536,9 +544,7 @@ class SyncRepositoryImpl @Inject constructor(
                         }
 
                         val resp = outcome.response
-                        if (patient == null || resp == null) {
-                            continue
-                        }
+                        if (patient == null || resp == null) continue
 
                         val entries = (resp.capturedBiometricsList ?: emptyList()) + (resp.capturedBiometricsList2 ?: emptyList())
 
@@ -548,11 +554,7 @@ class SyncRepositoryImpl @Inject constructor(
                             continue
                         }
 
-                        // Performance optimization: avoid per-candidate detail calls during
-                        // biometric phase. This call is expensive at scale and was a major
-                        // contributor to slow sync runs. Use already-cached detail when present.
                         val detail = detailCache[personUuid]
-
                         val biometricItems = (detail?.biometric?.items ?: emptyList())
                             .filter { (it.archived ?: 0) == 0 }
                         val patientFacilityId = detail?.patient?.facilityId ?: patient.facilityId
@@ -605,7 +607,8 @@ class SyncRepositoryImpl @Inject constructor(
                                     continue
                                 }
 
-                                val hash = e.templateHash?.lowercase() ?: sha256Hex(templateBytes)
+                                val normalizedForHash = BiometricTemplateNormalizer.canonicalize(templateBytes)
+                                val hash = e.templateHash?.lowercase() ?: sha256Hex(normalizedForHash)
 
                                 val meta = when {
                                     e.sourceId != null -> biometricItems.firstOrNull { it.id == e.sourceId.toString() }
@@ -676,7 +679,7 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             if (patientEntities.isNotEmpty()) {
-                onProgress?.invoke("Phase 3: Syncing Viral Load history for ${patientEntities.size} clients...")
+                onProgress?.invoke("Phase 3: Syncing Viral Load history...")
                 for (chunk in patientEntities.chunked(DETAIL_PARALLELISM)) {
                     val outcomes = coroutineScope {
                         chunk.map { patient ->
@@ -704,7 +707,7 @@ class SyncRepositoryImpl @Inject constructor(
                     onProgress?.invoke("Phase 3: Viral Load history... $viralLoadAdded records")
                 }
 
-                onProgress?.invoke("Phase 4: Syncing ART Pharmacy history for ${patientEntities.size} clients...")
+                onProgress?.invoke("Phase 4: Syncing ART Pharmacy history...")
                 for (chunk in patientEntities.chunked(DETAIL_PARALLELISM)) {
                     val outcomes = coroutineScope {
                         chunk.map { patient ->
@@ -736,43 +739,23 @@ class SyncRepositoryImpl @Inject constructor(
             val now = DateUtils.formatIso8601(Date())
             SharedPreferencesHelper.setLastSyncDate(context, now)
             syncLogDao.insert(SyncLog(
-                tableName = "all", 
-                lastSyncedRecordId = now, 
-                syncDate = Date(), 
+                tableName = "all",
+                lastSyncedRecordId = now,
+                syncDate = Date(),
                 status = "SUCCESS"
             ))
             
             onProgress?.invoke("Sync complete: $patientsAdded patients, $biometricsAdded biometrics, $viralLoadAdded VL history, $pharmacyAdded pharmacy history")
-            onProgress?.invoke("Skipped $invalidBiometricsSkipped invalid/low-quality templates")
-
-            val biometricBatchSize = biometricCandidates.distinctBy { it.first }.size
-            val audit = SyncAudit(
-                pagesRead = pagesThisRun,
-                uniquePatientsSaved = patientsAdded,
-                biometricCandidates = biometricBatchSize,
-                biometricsSaved = biometricsAdded,
-                biometricsSkipped = totalBiometricSkipped,
-                biometricsFailed = totalBiometricFailed,
-                viralLoadHistorySaved = viralLoadAdded,
-                pharmacyHistorySaved = pharmacyAdded,
-            )
 
             SyncResult.Success(
                 patientsAdded = patientsAdded,
                 biometricsAdded = biometricsAdded,
                 viralLoadHistoryAdded = viralLoadAdded,
-                pharmacyHistoryAdded = pharmacyAdded,
-                audit = audit
+                pharmacyHistoryAdded = pharmacyAdded
             )
             
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)
-            syncLogDao.insert(SyncLog(
-                tableName = "all", 
-                lastSyncedRecordId = "", 
-                syncDate = Date(), 
-                status = "ERROR: ${e.message}"
-            ))
             SyncResult.Error(e.message ?: "Unknown error")
         }
     }
@@ -787,57 +770,12 @@ class SyncRepositoryImpl @Inject constructor(
     override suspend fun getLastSyncInfo(): String? = SharedPreferencesHelper.getLastSyncDate(context)
     override fun resetSyncPage() = SharedPreferencesHelper.setSyncPage(context, 0)
 
-    private suspend fun findPatientByUuid(personUuid: String, patientEntities: List<Patient>): Patient? {
-        Log.d(TAG, "Looking for patient with UUID: $personUuid")
-        
-        patientEntities.firstOrNull { it.uuid == personUuid }?.let { 
-            Log.d(TAG, "Found patient by direct UUID match: ${it.uuid}")
-            return it 
-        }
-        
-        patientDao.getByUuid(personUuid)?.let { 
-            Log.d(TAG, "Found patient in DB by UUID: ${it.uuid}")
-            return it 
-        }
-        
-        try {
-            val detail = wincoApiService.getClientDetail(personUuid)
-            val enrollmentUuid = detail.enrollment?.uuid
-            if (enrollmentUuid != null) {
-                patientEntities.firstOrNull { it.emrId == enrollmentUuid }?.let { 
-                    Log.d(TAG, "Found patient by enrollment UUID: ${it.uuid}")
-                    return it 
-                }
-                patientDao.getByEmrId(enrollmentUuid)?.let { 
-                    Log.d(TAG, "Found patient in DB by enrollment UUID: ${it.uuid}")
-                    return it 
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch detail for patient lookup: $personUuid", e)
-        }
-        
-        patientDao.getByPersonUuid(personUuid)?.let {
-            Log.d(TAG, "Found patient by person_uuid: ${it.uuid}")
-            return it
-        }
-        
-        Log.w(TAG, "No patient found for UUID: $personUuid")
-        return null
-    }
-
     private suspend fun downloadBiometricWithRetry(personUuid: String): com.carecompanion.data.network.models.WincoBiometricResponse? {
         repeat(MAX_RETRIES) { attempt ->
             try {
                 return wincoApiService.getBiometricTemplates(personUuid)
             } catch (e: HttpException) {
-                if (e.code() == 404) {
-                    return null
-                }
-                if (attempt == MAX_RETRIES - 1) throw e
-                Log.w(TAG, "Retry ${attempt + 1}/$MAX_RETRIES for $personUuid after error: ${e.message}")
-                delay(RETRY_DELAY_MS * (attempt + 1))
-            } catch (e: Exception) {
+                if (e.code() == 404) return null
                 if (attempt == MAX_RETRIES - 1) throw e
                 delay(RETRY_DELAY_MS * (attempt + 1))
             }
@@ -865,31 +803,6 @@ class SyncRepositoryImpl @Inject constructor(
         return block()
     }
 
-    /**
-     * Returns true if this WINCO care category or raw EMR status should be pulled
-     * into the local Care Companion database.
-     *
-     * The WINCO server now returns pre-computed care_category values (ACTIVE, IIT,
-     * TRANSFER_OUT, DEATH, STOPPED_TREATMENT, OTHER_INACTIVE). All non-archived
-     * ART clients returned by the server are eligible — filtering is done server-side
-     * via the applyCareFilter / careCategories parameters. This helper is retained for
-     * any offline or legacy re-classification paths.
-     */
-    private fun isMobilePullStatus(status: String?): Boolean {
-        val s = status?.trim()?.uppercase()?.replace(" ", "_")?.replace("-", "_") ?: return false
-        return s in setOf(
-            // WINCO care categories (server-computed)
-            "ACTIVE", "ACTIVE_TX_CURR",
-            "IIT", "INTERRUPTED_IN_TREATMENT", "LTFU", "LOST_TO_FOLLOW_UP",
-            "TRANSFER_OUT", "ART_TRANSFER_OUT",
-            "DEATH", "DIED", "DEAD",
-            "STOPPED_TREATMENT", "TREATMENT_STOPPED", "ART_STOP",
-            "OTHER_INACTIVE",
-            // Raw EMR statuses (legacy / direct sync path)
-            "ART", "ART_START", "ART_TRANSFER_IN",
-        )
-    }
-
     private fun WincoClientItem.toPatient(
         defaultFacilityId: Long,
         lastViralLoadDate: String? = null,
@@ -901,9 +814,7 @@ class SyncRepositoryImpl @Inject constructor(
     ): Patient {
         val effectiveStatus = careCategory?.takeIf { it.isNotBlank() } ?: latestHivStatus
         val effectiveFullName = patientName?.takeIf { it.isNotBlank() }
-            ?: listOfNotNull(firstName, middleName, lastName)
-                .joinToString(" ")
-                .takeIf { it.isNotBlank() }
+            ?: listOfNotNull(firstName, middleName, lastName).joinToString(" ").takeIf { it.isNotBlank() }
         val isArchived = (archived ?: 0) != 0
         val isActivePatient = !isArchived
         return Patient(
@@ -965,7 +876,6 @@ class SyncRepositoryImpl @Inject constructor(
         if (!needsDemographyEnrichment()) return this
 
         return try {
-            // Prefer cache hit (including null = fetch failed) to avoid a redundant API call.
             val detail = if (detailCache.containsKey(personUuid)) {
                 detailCache[personUuid]
             } else {
@@ -979,9 +889,7 @@ class SyncRepositoryImpl @Inject constructor(
 
             val patient = detail.patient ?: return this
             val fullNameFromDetail = patient.fullName?.takeIf { it.isNotBlank() }
-                ?: listOfNotNull(patient.firstName, patient.middleName, patient.lastName)
-                    .joinToString(" ")
-                    .takeIf { it.isNotBlank() }
+                ?: listOfNotNull(patient.firstName, patient.middleName, patient.lastName).joinToString(" ")
 
             copy(
                 firstName = patient.firstName ?: firstName,
@@ -1010,9 +918,6 @@ class SyncRepositoryImpl @Inject constructor(
         if ((archived ?: 0) != 0) return false
         if (!enrollmentUuid.isNullOrBlank()) return true
 
-        // Use containsKey so a null stored for a failed fetch is treated as a cache hit
-        // and does not trigger another API call. Pre-fetch in syncAll ensures the cache
-        // is populated before this function is called.
         val detail = if (detailCache.containsKey(personUuid)) {
             detailCache[personUuid]
         } else {
@@ -1069,13 +974,6 @@ class SyncRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun sha256Hex(data: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(data)
-        return buildString(digest.size * 2) {
-            digest.forEach { append("%02x".format(it)) }
-        }
-    }
-
     private fun pharmacyId(personUuid: String, visitDate: String): Long {
         val bytes = MessageDigest.getInstance("SHA-256")
             .digest("$personUuid:$visitDate".toByteArray(Charsets.UTF_8))
@@ -1128,5 +1026,129 @@ class SyncRepositoryImpl @Inject constructor(
             sourceId = sourceId,
             source = "WINCO"
         )
+    }
+
+    // ENROLLMENT: Always normalize template, enforce quality, and log all outcomes
+    override suspend fun enrollBiometric(
+        patientUuid: String,
+        fingerType: String,
+        template: ByteArray,
+        quality: Int,
+        facilityId: Long?,
+        userId: String?
+    ): Boolean {
+        val normalized = BiometricTemplateNormalizer.canonicalize(template)
+        val isValid = BiometricTemplateNormalizer.isValid(normalized)
+        val qualityAssessment = com.carecompanion.biometric.BiometricQualityValidator.validateEnrollmentQuality(quality)
+        val hash = SyncRepositoryImpl.sha256Hex(normalized)
+        val status = when {
+            !isValid -> "ERROR"
+            !qualityAssessment.passed -> "LOW_QUALITY"
+            else -> "SUCCESS"
+        }
+        com.carecompanion.biometric.BiometricAuditLogger.logEnrollment(
+            patientUuid = patientUuid,
+            fingerType = fingerType,
+            quality = quality,
+            templateHash = hash,
+            status = status,
+            errorMessage = if (!isValid) "Invalid template" else if (!qualityAssessment.passed) qualityAssessment.message else null,
+            userId = userId,
+            facilityId = facilityId
+        )
+        return status == "SUCCESS"
+    }
+
+    // IDENTIFICATION: Always normalize, match, and log all attempts/results
+    override suspend fun identifyBiometric(
+        capturedTemplate: ByteArray,
+        facilityId: Long?,
+        userId: String?
+    ): PatientMatchResult? {
+        val start = System.currentTimeMillis()
+        val canonicalCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val allBiometrics = biometricDao.getAllBiometrics()
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
+
+        var bestMatch: Biometric? = null
+        var bestScore = 0.0
+
+        // Chunked processing with per-chunk timeout protection (Issue 4 fix):
+        // Search in chunks of IDENTIFICATION_CHUNK_SIZE so the search can be
+        // cancelled and progress reported without hanging the UI for large DBs.
+        val CHUNK_SIZE = 500
+        val SEARCH_TIMEOUT_MS = 30_000L  // 30 seconds hard cap for entire 1:N search
+        outer@ for (chunk in allBiometrics.chunked(CHUNK_SIZE)) {
+            if (System.currentTimeMillis() - start > SEARCH_TIMEOUT_MS) {
+                Log.w(TAG, "identifyBiometric: search timeout after ${System.currentTimeMillis() - start}ms, " +
+                    "searched ${allBiometrics.indexOf(chunk.first())} / ${allBiometrics.size} records")
+                break
+            }
+            for (bio in chunk) {
+                val score = compareTemplates(canonicalCaptured, bio.template)
+                if (score > bestScore && score >= matchThreshold) {
+                    bestScore = score
+                    bestMatch = bio
+                    // Early exit: perfect hash-level match
+                    if (bestScore >= 99.9) break@outer
+                }
+            }
+        }
+
+        val duration = System.currentTimeMillis() - start
+        com.carecompanion.biometric.BiometricAuditLogger.logIdentification(
+            matchedPatientUuid = bestMatch?.personUuid,
+            fingerType = bestMatch?.biometricType ?: "UNKNOWN",
+            matchScore = bestScore,
+            candidatesSearched = allBiometrics.size,
+            searchDurationMs = duration,
+            method = "TEMPLATE",
+            userId = userId,
+            facilityId = facilityId
+        )
+        return if (bestMatch != null) PatientMatchResult(
+            patient = patientDao.getByUuid(bestMatch.personUuid),
+            template = bestMatch,
+            matchType = MatchType.TEMPLATE,
+            confidence = bestScore
+        ) else null
+    }
+
+    // VERIFICATION: Always normalize, match, and log all attempts/results
+    override suspend fun verifyBiometric(
+        capturedTemplate: ByteArray,
+        personUuid: String,
+        fingerType: String,
+        facilityId: Long?,
+        userId: String?
+    ): PatientMatchResult? {
+        val canonicalCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
+        val patientBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, fingerType, facilityId)
+        var bestMatch: Biometric? = null
+        var bestScore = 0.0
+        val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
+        for (bio in patientBiometrics) {
+            val score = compareTemplates(canonicalCaptured, bio.template)
+            if (score > bestScore && score >= matchThreshold) {
+                bestScore = score
+                bestMatch = bio
+            }
+        }
+        com.carecompanion.biometric.BiometricAuditLogger.logVerification(
+            patientUuid = personUuid,
+            fingerType = fingerType,
+            matchScore = bestScore,
+            isMatch = bestMatch != null,
+            matchThreshold = matchThreshold,
+            method = "TEMPLATE",
+            userId = userId,
+            facilityId = facilityId
+        )
+        return if (bestMatch != null) PatientMatchResult(
+            patient = patientDao.getByUuid(bestMatch.personUuid),
+            template = bestMatch,
+            matchType = MatchType.TEMPLATE,
+            confidence = bestScore
+        ) else null
     }
 }

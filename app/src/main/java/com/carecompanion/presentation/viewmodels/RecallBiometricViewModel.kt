@@ -126,30 +126,30 @@ class RecallBiometricViewModel @Inject constructor(
     private suspend fun matchFingerprint(template: ByteArray) {
         _uiState.update { it.copy(step = RecallStep.MATCHING) }
         try {
-            val matchResult = syncRepository.findPatientByBiometric(template)
-            if (matchResult != null && matchResult.patient != null && matchResult.template != null) {
+            val matchResult = (syncRepository as? com.carecompanion.data.repository.SyncRepositoryImpl)?.identifyBiometric(
+                capturedTemplate = template,
+                facilityId = null // Optionally pass facilityId if available
+            )
+            val isMatch = matchResult?.patient != null && matchResult.template != null
+            // Audit log every identification attempt for NPHCDA compliance
+            com.carecompanion.biometric.BiometricAuditLogger.logIdentification(
+                matchedPatientUuid = if (isMatch) matchResult?.patient?.uuid else null,
+                fingerType = matchResult?.template?.biometricType ?: "UNKNOWN",
+                matchScore = (matchResult?.confidence ?: 0.0) * 100.0,
+                candidatesSearched = _uiState.value.totalBiometricTemplates,
+                searchDurationMs = 0L,
+                method = "REPOSITORY"
+            )
+            if (isMatch) {
                 _uiState.update {
                     it.copy(
                         step = RecallStep.MATCHED,
-                        matchedPatient = MatchedPatient(matchResult.patient, matchResult.template, matchResult.confidence),
+                        matchedPatient = MatchedPatient(matchResult!!.patient!!, matchResult.template!!, matchResult.confidence),
                         matchScore = matchResult.confidence * 100.0
                     )
                 }
                 return
             }
-
-            val sdkFallback = runSdkIdentificationFallback(template)
-            if (sdkFallback != null) {
-                _uiState.update {
-                    it.copy(
-                        step = RecallStep.MATCHED,
-                        matchedPatient = MatchedPatient(sdkFallback.first, sdkFallback.second, sdkFallback.third),
-                        matchScore = sdkFallback.third
-                    )
-                }
-                return
-            }
-
             _uiState.update { it.copy(step = RecallStep.NO_MATCH, matchScore = (matchResult?.confidence ?: 0.0) * 100.0) }
         } catch (e: Exception) {
             _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = e.message) }
