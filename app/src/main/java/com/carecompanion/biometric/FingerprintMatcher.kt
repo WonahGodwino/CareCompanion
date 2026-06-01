@@ -90,7 +90,7 @@ class FingerprintMatcher {
             }
 
             val isMatch = score >= threshold
-            Log.d(TAG, "$purpose match: score=$score, threshold=$threshold, matches=$matchingPairs")
+            Log.d(TAG, "$purpose match: score=$score, threshold=$threshold, matches=${alignment.size}")
 
             MatchResult(score = score, isMatch = isMatch)
         } catch (e: Exception) {

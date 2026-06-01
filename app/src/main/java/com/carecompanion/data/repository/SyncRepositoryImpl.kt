@@ -5,6 +5,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.room.withTransaction
 import com.carecompanion.biometric.BiometricTemplateNormalizer
+import com.carecompanion.biometric.FingerprintMatcher
 import com.carecompanion.data.database.AppDatabase
 import com.carecompanion.data.database.dao.ArtPharmacyDao
 import com.carecompanion.data.database.dao.BiometricDao
@@ -108,6 +109,9 @@ class SyncRepositoryImpl @Inject constructor(
     private val hashBackfillMutex = Mutex()
     @Volatile private var hashBackfillCompleted = false
 
+    // Minutiae-based matcher used by compareTemplates() — stateless, safe to share
+    private val fingerprintMatcher = FingerprintMatcher()
+
     // ========== BIOMETRIC IDENTIFICATION - IMPROVED VERSION ==========
     
     suspend fun findPatientByBiometric(
@@ -197,7 +201,7 @@ class SyncRepositoryImpl @Inject constructor(
         val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
         
         for ((index, bio) in patientBiometrics.withIndex()) {
-            val score = compareTemplates(normalizedCaptured, bio.template)
+            val score = compareTemplates(normalizedCaptured, bio.template, "VERIFY")
             Log.d(TAG, "Template $index score: ${String.format("%.2f", score)}")
             
             if (score > bestScore && score >= matchThreshold) {
@@ -222,36 +226,30 @@ class SyncRepositoryImpl @Inject constructor(
     }
 
     // ========== IMPROVED TEMPLATE COMPARISON ==========
-    
-    private fun compareTemplates(template1: ByteArray, template2: ByteArray): Double {
+
+    /**
+     * Compares two fingerprint templates using FingerprintMatcher (Bozorth3 minutiae algorithm).
+     *
+     * Returns a score in the 0.0–1.0 range (FingerprintMatcher score / 100.0) so that
+     * the existing confidence/threshold convention throughout the codebase is preserved.
+     *
+     * Two captures of the same finger will NEVER produce identical bytes — byte-level
+     * comparison is deliberately replaced by minutiae-based matching here.
+     *
+     * @param purpose "VERIFY" for 1:1 (threshold 55), "IDENTIFY" for 1:N (threshold 50)
+     */
+    private fun compareTemplates(
+        template1: ByteArray,
+        template2: ByteArray,
+        purpose: String = "IDENTIFY"
+    ): Double {
         val norm1 = BiometricTemplateNormalizer.canonicalize(template1)
         val norm2 = BiometricTemplateNormalizer.canonicalize(template2)
-        
         if (norm1.isEmpty() || norm2.isEmpty()) return 0.0
-        
-        // Exact match
+        // Exact byte match (e.g. same stored template used in test path) — shortcut
         if (norm1.contentEquals(norm2)) return 1.0
-        
-        // Calculate similarity based on byte patterns
-        val minLen = minOf(norm1.size, norm2.size)
-        if (minLen == 0) return 0.0
-        
-        // Simple byte-by-byte comparison (more tolerant than block hashing)
-        var matches = 0
-        for (i in 0 until minLen) {
-            if (norm1[i] == norm2[i]) {
-                matches++
-            }
-        }
-        
-        val similarity = matches.toDouble() / minLen.toDouble()
-        
-        // Boost score if lengths are similar
-        val maxLen = maxOf(norm1.size, norm2.size)
-        val lengthRatio = minLen.toDouble() / maxLen.toDouble()
-        
-        // Weighted score: 70% byte similarity, 30% length similarity
-        return (similarity * 0.7) + (lengthRatio * 0.3)
+        // Minutiae-based match — tolerant of translation, rotation, and pressure variation
+        return fingerprintMatcher.match(norm1, norm2, purpose).score / 100.0
     }
 
     private fun templateFeatures(template: ByteArray): TemplateFeatures {
@@ -751,7 +749,13 @@ class SyncRepositoryImpl @Inject constructor(
                 patientsAdded = patientsAdded,
                 biometricsAdded = biometricsAdded,
                 viralLoadHistoryAdded = viralLoadAdded,
-                pharmacyHistoryAdded = pharmacyAdded
+                pharmacyHistoryAdded = pharmacyAdded,
+                audit = SyncResult.SyncAudit(
+                    pagesRead = pagesThisRun,
+                    biometricCandidates = biometricCandidates.size,
+                    biometricsSkipped = totalBiometricSkipped + invalidBiometricsSkipped,
+                    biometricsFailed = totalBiometricFailed
+                )
             )
             
         } catch (e: Exception) {
@@ -1123,12 +1127,14 @@ class SyncRepositoryImpl @Inject constructor(
         userId: String?
     ): PatientMatchResult? {
         val canonicalCaptured = BiometricTemplateNormalizer.canonicalize(capturedTemplate)
-        val patientBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, fingerType, facilityId)
+        // Normalize fingerType so stored values like "right thumb" or "RIGHT-THUMB" all match
+        val normalizedFingerType = normalizeBiometricType(fingerType)
+        val patientBiometrics = biometricDao.getAllByPersonAndFinger(personUuid, normalizedFingerType, facilityId)
         var bestMatch: Biometric? = null
         var bestScore = 0.0
         val matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
         for (bio in patientBiometrics) {
-            val score = compareTemplates(canonicalCaptured, bio.template)
+            val score = compareTemplates(canonicalCaptured, bio.template, "VERIFY")
             if (score > bestScore && score >= matchThreshold) {
                 bestScore = score
                 bestMatch = bio
@@ -1136,7 +1142,7 @@ class SyncRepositoryImpl @Inject constructor(
         }
         com.carecompanion.biometric.BiometricAuditLogger.logVerification(
             patientUuid = personUuid,
-            fingerType = fingerType,
+            fingerType = normalizedFingerType,
             matchScore = bestScore,
             isMatch = bestMatch != null,
             matchThreshold = matchThreshold,
