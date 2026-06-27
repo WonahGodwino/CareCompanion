@@ -100,31 +100,82 @@ interface PatientDao {
 
     // ── VL Cascade counts (reactive) ───────────────────────────────────────────
 
-    @Query("SELECT COUNT(*) FROM patient_person WHERE isActive = 1")
-    fun observeTxCurrCount(): kotlinx.coroutines.flow.Flow<Int>
-
-    @Query("SELECT COUNT(*) FROM patient_person WHERE isActive = 1 AND lastViralLoadDate IS NOT NULL")
-    fun observeVlTestedCount(): kotlinx.coroutines.flow.Flow<Int>
+    // TX_CURR (Current on Treatment) and the VL cascade share ONE cohort: on-ART (currentStatus holds
+    // WINCO's care_category — ACTIVE/IIT ⇔ raw ART_START/ART_TRANSFER_IN), ALIVE, and pharmacy coverage
+    // NOT lapsed (latest visitDate + refillPeriod + 28 days >= today). Mirrors WINCO _is_tx_curr_active
+    // and Patient.calculatePatientStatus. Excludes lapsed-coverage (IIT), TRANSFER_OUT, DEATH, STOPPED,
+    // and non-ART rows. Dates are stored as epoch-millis; 86400000 = ms/day.
+    @Query("""
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+    """)
+    fun observeTxCurrCount(todayMs: Long): kotlinx.coroutines.flow.Flow<Int>
 
     @Query("""
-        SELECT COUNT(*) FROM patient_person
-        WHERE isActive = 1
-          AND lastViralLoadDate IS NOT NULL
-          AND (lastViralLoadResult IS NOT NULL OR lastViralLoadResultRaw IS NOT NULL)
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE p.facilityId = :facilityId
+          AND (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
     """)
-    fun observeVlResultReceivedCount(): kotlinx.coroutines.flow.Flow<Int>
+    fun observeTxCurrCountByFacility(todayMs: Long, facilityId: Long): kotlinx.coroutines.flow.Flow<Int>
 
     @Query("""
-        SELECT COUNT(*) FROM patient_person
-        WHERE isActive = 1 AND lastViralLoadResult IS NOT NULL AND lastViralLoadResult < 1000
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+          AND p.lastViralLoadDate IS NOT NULL
     """)
-    fun observeVlSuppressedCount(): kotlinx.coroutines.flow.Flow<Int>
+    fun observeVlTestedCount(todayMs: Long): kotlinx.coroutines.flow.Flow<Int>
 
     @Query("""
-        SELECT COUNT(*) FROM patient_person
-        WHERE isActive = 1 AND lastViralLoadResult IS NOT NULL AND lastViralLoadResult >= 1000
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+          AND p.lastViralLoadDate IS NOT NULL
+          AND (p.lastViralLoadResult IS NOT NULL OR p.lastViralLoadResultRaw IS NOT NULL)
     """)
-    fun observeVlUnsuppressedCount(): kotlinx.coroutines.flow.Flow<Int>
+    fun observeVlResultReceivedCount(todayMs: Long): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("""
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+          AND p.lastViralLoadResult IS NOT NULL AND p.lastViralLoadResult < 1000
+    """)
+    fun observeVlSuppressedCount(todayMs: Long): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("""
+        SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+          AND p.lastViralLoadResult IS NOT NULL AND p.lastViralLoadResult >= 1000
+    """)
+    fun observeVlUnsuppressedCount(todayMs: Long): kotlinx.coroutines.flow.Flow<Int>
 
     // ── TPT screen — active ART patients with TB screening data ───────────────
 

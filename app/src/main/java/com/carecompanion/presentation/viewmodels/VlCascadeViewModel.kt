@@ -26,12 +26,15 @@ class VlCascadeViewModel @Inject constructor(
     private val patientRepository: PatientRepository
 ) : ViewModel() {
 
+    // Anchor "today" once at construction so all five coverage windows use the same instant.
+    private val todayMs: Long = System.currentTimeMillis()
+
     val uiState: StateFlow<VlCascadeUiState> = combine(
-        patientRepository.observeTxCurrCount(),
-        patientRepository.observeVlTestedCount(),
-        patientRepository.observeVlResultReceivedCount(),
-        patientRepository.observeVlSuppressedCount(),
-        patientRepository.observeVlUnsuppressedCount()
+        patientRepository.observeTxCurrCount(todayMs),
+        patientRepository.observeVlTestedCount(todayMs),
+        patientRepository.observeVlResultReceivedCount(todayMs),
+        patientRepository.observeVlSuppressedCount(todayMs),
+        patientRepository.observeVlUnsuppressedCount(todayMs)
     ) { txCurr, tested, received, suppressed, unsuppressed ->
         VlCascadeUiState(
             txCurr           = txCurr,

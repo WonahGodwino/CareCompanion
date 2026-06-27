@@ -58,7 +58,10 @@ class SyncViewModel @Inject constructor(
     fun loadDashboardSummary() {
         viewModelScope.launch {
             try {
-                val summary = wincoApiService.getDashboardSummary()
+                // Scope KPIs to THIS facility — without it WINCO returns the all-facility total,
+                // inflating TX_CURR on a multi-facility server.
+                val facilityId = SharedPreferencesHelper.getActiveFacilityId(context).takeIf { it > 0L }
+                val summary = wincoApiService.getDashboardSummary(facilityId = facilityId)
                 _uiState.update { it.copy(dashboardSummary = summary) }
             } catch (_: Exception) {
                 // Non-fatal — KPI cards simply stay hidden

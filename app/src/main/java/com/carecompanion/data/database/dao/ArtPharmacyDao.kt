@@ -18,12 +18,13 @@ interface ArtPharmacyDao {
     @Query("DELETE FROM art_pharmacy WHERE personUuid = :personUuid") suspend fun deleteByPersonUuid(personUuid: String)
 
     // ── IIT (Interruption in Treatment) queries ───────────────────────────────
-    // Definition: patient whose expected return date (nextAppointment + refillPeriod) has passed.
-    // refillPeriod is in days (90, 180, etc.); defaults to 28 if not set.
+    // Definition (PEPFAR TX_ML, consistent with WINCO _is_tx_curr_active and Patient.calculatePatientStatus):
+    // an on-ART, alive patient whose pharmacy coverage has LAPSED — latest visitDate + refillPeriod + 28
+    // days < today. (Was previously nextAppointment + 28, which is a different, inconsistent formula.)
+    // Excludes TRANSFER_OUT / DEATH / STOPPED and non-ART rows. refillPeriod is in days.
 
     /**
-     * All facilities — reactive Flow of IIT clients whose most recent ART pharmacy
-     * record's expected return date (nextAppointment + refillPeriod days) is before today.
+     * All facilities — reactive Flow of IIT clients (coverage lapsed: visitDate + refillPeriod + 28 < today).
      * [todayMs] should be System.currentTimeMillis() or today as milliseconds since epoch.
      */
     @Query("""
@@ -46,12 +47,13 @@ interface ArtPharmacyDao {
         FROM patient_person p
         INNER JOIN art_pharmacy ap
             ON p.uuid = ap.personUuid
-        WHERE p.isActive = 1
-          AND ap.nextAppointment IS NOT NULL
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
           AND ap.visitDate = (
               SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
           )
-          AND ap.nextAppointment + (28 * 86400000) < :todayMs
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) < :todayMs
         GROUP BY p.uuid
         ORDER BY ap.nextAppointment ASC
     """)
@@ -80,13 +82,14 @@ interface ArtPharmacyDao {
         FROM patient_person p
         INNER JOIN art_pharmacy ap
             ON p.uuid = ap.personUuid
-        WHERE p.isActive = 1
-          AND p.facilityId = :facilityId
-          AND ap.nextAppointment IS NOT NULL
+        WHERE p.facilityId = :facilityId
+          AND (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
           AND ap.visitDate = (
               SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid
           )
-          AND ap.nextAppointment + (28 * 86400000) < :todayMs
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) < :todayMs
         GROUP BY p.uuid
         ORDER BY ap.nextAppointment ASC
     """)

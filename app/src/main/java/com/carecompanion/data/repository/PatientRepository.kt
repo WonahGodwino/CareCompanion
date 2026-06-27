@@ -60,11 +60,12 @@ interface PatientRepository {
     fun observeNoBiometricSearch(q: String): Flow<List<NoBiometricEntry>>
 
     // ── VL Cascade counts ──────────────────────────────────────────────────────
-    fun observeTxCurrCount(): Flow<Int>
-    fun observeVlTestedCount(): Flow<Int>
-    fun observeVlResultReceivedCount(): Flow<Int>
-    fun observeVlSuppressedCount(): Flow<Int>
-    fun observeVlUnsuppressedCount(): Flow<Int>
+    fun observeTxCurrCount(todayMs: Long): Flow<Int>
+    fun observeTxCurrCountByFacility(todayMs: Long, facilityId: Long): Flow<Int>
+    fun observeVlTestedCount(todayMs: Long): Flow<Int>
+    fun observeVlResultReceivedCount(todayMs: Long): Flow<Int>
+    fun observeVlSuppressedCount(todayMs: Long): Flow<Int>
+    fun observeVlUnsuppressedCount(todayMs: Long): Flow<Int>
 
     // ── TPT ────────────────────────────────────────────────────────────────────
     fun observeTptPatients(): Flow<List<TptEntry>>
