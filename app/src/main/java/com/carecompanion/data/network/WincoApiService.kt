@@ -4,6 +4,7 @@ import com.carecompanion.data.network.models.WincoBiometricResponse
 import com.carecompanion.data.network.models.WincoBulkBiometricRequest
 import com.carecompanion.data.network.models.WincoBulkBiometricResponse
 import com.carecompanion.data.network.models.WincoClientDetail
+import com.carecompanion.data.network.models.WincoEacResponse
 import com.carecompanion.data.network.models.WincoClientPage
 import com.carecompanion.data.network.models.WincoFacility
 import com.carecompanion.data.network.models.WincoSummary
@@ -144,6 +145,11 @@ interface WincoApiService {
     suspend fun getViralLoadHistory(
         @Path("person_uuid") personUuid: String,
     ): WincoViralLoadHistoryResponse
+
+    @GET("api/art/clients/{person_uuid}/eac")
+    suspend fun getEac(
+        @Path("person_uuid") personUuid: String,
+    ): WincoEacResponse
 
     @GET("api/art/clients/{person_uuid}/pharmacy-history")
     suspend fun getPharmacyHistory(

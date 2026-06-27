@@ -12,16 +12,19 @@ import com.carecompanion.data.database.dao.BiometricDao
 import com.carecompanion.data.database.dao.PatientDao
 import com.carecompanion.data.database.dao.SyncLogDao
 import com.carecompanion.data.database.dao.ViralLoadHistoryDao
+import com.carecompanion.data.database.dao.EacEpisodeDao
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.data.database.entities.SyncLog
 import com.carecompanion.data.database.entities.ViralLoadHistory
+import com.carecompanion.data.database.entities.EacEpisode
 import com.carecompanion.data.network.WincoApiService
 import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoClientItem
 import com.carecompanion.data.network.models.WincoPharmacyVisit
 import com.carecompanion.data.network.models.WincoViralLoadHistoryItem
+import com.carecompanion.data.network.models.WincoEacEpisode
 import com.carecompanion.utils.DateUtils
 import com.carecompanion.utils.NetworkUtils
 import com.carecompanion.utils.SharedPreferencesHelper
@@ -46,6 +49,7 @@ class SyncRepositoryImpl @Inject constructor(
     private val artPharmacyDao: ArtPharmacyDao,
     private val syncLogDao: SyncLogDao,
     private val viralLoadHistoryDao: ViralLoadHistoryDao,
+    private val eacEpisodeDao: EacEpisodeDao,
 ) : SyncRepository {
 
     companion object {
@@ -737,6 +741,34 @@ class SyncRepositoryImpl @Inject constructor(
                     pharmacyAdded += validOutcomes.sumOf { it.second.size }
                     onProgress?.invoke("Phase 4: Pharmacy history... $pharmacyAdded records")
                 }
+
+                // Phase 5: EAC episodes — fetched only for unsuppressed clients (the EAC-relevant
+                // cohort), so the on-device EacGapEngine can flag cascade gaps for active clients.
+                val eacCohort = patientEntities.filter { (it.lastViralLoadResult ?: 0L) >= 1000L }
+                if (eacCohort.isNotEmpty()) {
+                    onProgress?.invoke("Phase 5: Syncing EAC...")
+                    for (chunk in eacCohort.chunked(DETAIL_PARALLELISM)) {
+                        val outcomes = coroutineScope {
+                            chunk.map { patient ->
+                                async {
+                                    try {
+                                        val resp = retryWithBackoff { wincoApiService.getEac(patient.uuid) }
+                                        Pair(patient.uuid, resp.episodes.mapNotNull { it.toEacEpisode(patient.uuid) })
+                                    } catch (e: Exception) {
+                                        null  // 404 for non-ART / no EAC is expected; skip
+                                    }
+                                }
+                            }.awaitAll()
+                        }
+                        val valid = outcomes.filterNotNull()
+                        db.withTransaction {
+                            valid.forEach { (uuid, episodes) ->
+                                eacEpisodeDao.deleteByPersonUuid(uuid)
+                                if (episodes.isNotEmpty()) eacEpisodeDao.insertAll(episodes)
+                            }
+                        }
+                    }
+                }
             }
 
             val now = DateUtils.formatIso8601(Date())
@@ -981,6 +1013,22 @@ class SyncRepositoryImpl @Inject constructor(
             source = source,
             viralLoadIndication = viralLoadIndication,
             vlCategory = vlCategory,
+            lastSyncDate = Date(),
+        )
+    }
+
+    private fun WincoEacEpisode.toEacEpisode(personUuid: String): EacEpisode? {
+        val epUuid = uuid ?: return null
+        return EacEpisode(
+            personUuid = personUuid,
+            episodeUuid = epUuid,
+            status = status,
+            stage = stage,
+            sessions = sessions,
+            triggerVl = triggerVl,
+            triggerDate = DateUtils.parseDate(triggerDate),
+            repeatVl = repeatVl,
+            regimenSwitched = regimenSwitched,
             lastSyncDate = Date(),
         )
     }

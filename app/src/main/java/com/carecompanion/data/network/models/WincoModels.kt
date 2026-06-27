@@ -193,6 +193,27 @@ data class WincoViralLoadHistoryItem(
     @SerializedName("vl_category")          val vlCategory: String? = null,
 )
 
+// EAC cascade — from GET /api/art/clients/{uuid}/eac. The app stores the episodes and recomputes gaps
+// on-device (live TX_CURR + VL) via EacGapEngine; gaps/warnings here are WINCO's server-side view.
+data class WincoEacResponse(
+    @SerializedName("tx_curr")              val txCurr: Boolean = false,
+    @SerializedName("current_vl")           val currentVl: Long? = null,
+    @SerializedName("current_unsuppressed") val currentUnsuppressed: Boolean = false,
+    @SerializedName("episode_count")        val episodeCount: Int = 0,
+    @SerializedName("episodes")             val episodes: List<WincoEacEpisode> = emptyList(),
+)
+
+data class WincoEacEpisode(
+    @SerializedName("uuid")             val uuid: String? = null,
+    @SerializedName("status")           val status: String? = null,
+    @SerializedName("stage")            val stage: String? = null,
+    @SerializedName("sessions")         val sessions: Int = 0,
+    @SerializedName("trigger_vl")       val triggerVl: Double? = null,
+    @SerializedName("trigger_date")     val triggerDate: String? = null,
+    @SerializedName("repeat_vl")        val repeatVl: Double? = null,
+    @SerializedName("regimen_switched") val regimenSwitched: Boolean = false,
+)
+
 data class WincoTbScreeningSummary(
     @SerializedName("status")               val status: String? = null,
     @SerializedName("date")                 val date: String? = null,
