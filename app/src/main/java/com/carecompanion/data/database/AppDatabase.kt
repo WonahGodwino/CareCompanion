@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class],version=17,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class],version=18,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -205,10 +205,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // VL type categorisation: store the EMR VIRAL_LOAD_INDICATION code + resolved category on
+        // each VL history row (Baseline/Routine/Post-EAC/PMTCT/…) for cascade tracking + the AI.
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `viral_load_history` ADD COLUMN `viralLoadIndication` INTEGER")
+                db.execSQL("ALTER TABLE `viral_load_history` ADD COLUMN `vlCategory` TEXT")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

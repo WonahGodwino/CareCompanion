@@ -979,6 +979,8 @@ class SyncRepositoryImpl @Inject constructor(
             sampleDate = DateUtils.parseDate(dateSampleCollected),
             sourceId = sourceId,
             source = source,
+            viralLoadIndication = viralLoadIndication,
+            vlCategory = vlCategory,
             lastSyncDate = Date(),
         )
     }

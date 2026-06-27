@@ -35,5 +35,10 @@ data class ViralLoadHistory(
     val sampleDate: Date? = null,
     val sourceId: Long? = null,
     val source: String? = null,
+    // VL TYPE: EMR VIRAL_LOAD_INDICATION codeset id + its resolved category
+    // (Baseline / Routine / Post-EAC / PMTCT / Targeted-Failure / Unspecified). Lets the app and AI
+    // track the cascade Baseline → Routine → (unsuppressed → EAC → Post-EAC confirmation) and PMTCT VL.
+    val viralLoadIndication: Int? = null,
+    val vlCategory: String? = null,
     val lastSyncDate: Date,
 )

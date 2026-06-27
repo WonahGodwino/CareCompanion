@@ -189,6 +189,8 @@ data class WincoViralLoadHistoryItem(
     @SerializedName("date_sample_collected") val dateSampleCollected: String? = null,
     @SerializedName("source_id")            val sourceId: Long? = null,
     @SerializedName("source")               val source: String? = null,
+    @SerializedName("viral_load_indication") val viralLoadIndication: Int? = null,
+    @SerializedName("vl_category")          val vlCategory: String? = null,
 )
 
 data class WincoTbScreeningSummary(
