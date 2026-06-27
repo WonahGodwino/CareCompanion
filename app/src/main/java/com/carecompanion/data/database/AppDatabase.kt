@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class,EacEpisode::class,PmtctRecord::class],version=20,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class,EacEpisode::class,PmtctRecord::class,InfantRecord::class],version=21,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -23,6 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reminderLogDao(): ReminderLogDao
     abstract fun eacEpisodeDao(): EacEpisodeDao
     abstract fun pmtctRecordDao(): PmtctRecordDao
+    abstract fun infantRecordDao(): InfantRecordDao
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
@@ -266,10 +267,45 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // EID worklist (HIV-exposed infants + high-risk + intervention gaps).
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `infant_record` (
+                        `infantUuid` TEXT NOT NULL,
+                        `name` TEXT,
+                        `hospitalNumber` TEXT,
+                        `motherPersonUuid` TEXT,
+                        `ancNo` TEXT,
+                        `dateOfDelivery` INTEGER,
+                        `ageWeeks` INTEGER,
+                        `ageMonths` INTEGER,
+                        `highRisk` INTEGER NOT NULL,
+                        `highRiskReason` TEXT,
+                        `arvGiven` INTEGER NOT NULL,
+                        `ctxGiven` INTEGER NOT NULL,
+                        `pcrDone` INTEGER NOT NULL,
+                        `pcrResult` TEXT,
+                        `pcrPositive` INTEGER NOT NULL,
+                        `pcrResultReceived` INTEGER NOT NULL,
+                        `antibodyDone` INTEGER NOT NULL,
+                        `outcome18m` TEXT,
+                        `gapType` TEXT,
+                        `gapSeverity` TEXT,
+                        `gapMessage` TEXT,
+                        `gapCount` INTEGER NOT NULL,
+                        `lastSyncDate` INTEGER NOT NULL,
+                        PRIMARY KEY(`infantUuid`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_infant_record_motherPersonUuid` ON `infant_record` (`motherPersonUuid`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

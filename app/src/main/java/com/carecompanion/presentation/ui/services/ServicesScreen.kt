@@ -102,6 +102,15 @@ private fun serviceModules() = listOf(
         route         = Screen.PmtctWorklist.route
     ),
     ServiceModule(
+        title         = "EID — Exposed-Infant Diagnosis",
+        description   = "HIV-exposed infants with high-risk prediction and intervention gaps: ARV prophylaxis, EID DNA-PCR (6 wk) + result, cotrimoxazole, and the 18-month confirmatory antibody test.",
+        icon          = Icons.Default.ChildCare,
+        accentColor   = Color(0xFF4527A0),
+        onAccentColor = Color(0xFFEDE7F6),
+        available     = true,
+        route         = Screen.EidWorklist.route
+    ),
+    ServiceModule(
         title         = "VL Cascade — PEPFAR 95-95-95",
         description   = "Viral load cascade dashboard: TX_CURR · VL Tested · Results Received · Suppressed. Track facility suppression rate against the 95% PEPFAR target.",
         icon          = Icons.Default.BarChart,

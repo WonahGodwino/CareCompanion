@@ -51,6 +51,7 @@ class SyncRepositoryImpl @Inject constructor(
     private val viralLoadHistoryDao: ViralLoadHistoryDao,
     private val eacEpisodeDao: EacEpisodeDao,
     private val pmtctRecordDao: com.carecompanion.data.database.dao.PmtctRecordDao,
+    private val infantRecordDao: com.carecompanion.data.database.dao.InfantRecordDao,
 ) : SyncRepository {
 
     companion object {
@@ -771,10 +772,14 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                 }
 
+                // Facility scope (multi-tenancy): pass this device's facility to every cohort endpoint.
+                val facilityId = com.carecompanion.utils.SharedPreferencesHelper
+                    .getActiveFacilityId(context).takeIf { it > 0L }
+
                 // Phase 6: PMTCT worklist — one bulk call returns currently-pregnant women + VL gaps.
                 onProgress?.invoke("Phase 6: Syncing PMTCT...")
                 try {
-                    val pmtct = retryWithBackoff { wincoApiService.getPmtctWorklist(null) }
+                    val pmtct = retryWithBackoff { wincoApiService.getPmtctWorklist(facilityId) }
                     val records = pmtct.items.mapNotNull { it.toPmtctRecord() }
                     db.withTransaction {
                         pmtctRecordDao.clear()
@@ -782,6 +787,19 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "PMTCT worklist sync failed", e)
+                }
+
+                // Phase 7: EID worklist — HIV-exposed infants with high-risk prediction + intervention gaps.
+                onProgress?.invoke("Phase 7: Syncing EID...")
+                try {
+                    val eid = retryWithBackoff { wincoApiService.getEidWorklist(facilityId) }
+                    val records = eid.items.mapNotNull { it.toInfantRecord() }
+                    db.withTransaction {
+                        infantRecordDao.clear()
+                        if (records.isNotEmpty()) infantRecordDao.insertAll(records)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "EID worklist sync failed", e)
                 }
             }
 
@@ -1027,6 +1045,36 @@ class SyncRepositoryImpl @Inject constructor(
             source = source,
             viralLoadIndication = viralLoadIndication,
             vlCategory = vlCategory,
+            lastSyncDate = Date(),
+        )
+    }
+
+    private fun com.carecompanion.data.network.models.WincoInfantItem.toInfantRecord(): com.carecompanion.data.database.entities.InfantRecord? {
+        val iu = infantUuid ?: return null
+        val gap = gaps.firstOrNull()
+        return com.carecompanion.data.database.entities.InfantRecord(
+            infantUuid = iu,
+            name = name,
+            hospitalNumber = hospitalNumber,
+            motherPersonUuid = motherPersonUuid,
+            ancNo = ancNo,
+            dateOfDelivery = DateUtils.parseDate(dateOfDelivery),
+            ageWeeks = ageWeeks,
+            ageMonths = ageMonths,
+            highRisk = highRisk,
+            highRiskReason = highRiskReason,
+            arvGiven = arvGiven,
+            ctxGiven = ctxGiven,
+            pcrDone = pcrDone,
+            pcrResult = pcrResult,
+            pcrPositive = pcrPositive,
+            pcrResultReceived = pcrResultReceived,
+            antibodyDone = antibodyDone,
+            outcome18m = outcome18m,
+            gapType = gap?.type,
+            gapSeverity = gap?.severity,
+            gapMessage = gap?.message,
+            gapCount = gaps.size,
             lastSyncDate = Date(),
         )
     }

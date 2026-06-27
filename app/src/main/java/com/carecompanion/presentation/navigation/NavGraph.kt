@@ -19,6 +19,7 @@ import com.carecompanion.presentation.ui.recall.RecallScreen
 import com.carecompanion.presentation.ui.services.ArtRefillScreen
 import com.carecompanion.presentation.ui.services.EacWorklistScreen
 import com.carecompanion.presentation.ui.services.PmtctWorklistScreen
+import com.carecompanion.presentation.ui.services.EidWorklistScreen
 import com.carecompanion.presentation.ui.services.IITScreen
 import com.carecompanion.presentation.ui.services.MissedApptScreen
 import com.carecompanion.presentation.ui.services.ServicesScreen
@@ -53,6 +54,7 @@ sealed class Screen(val route: String) {
     object Tpt             : Screen("tpt")
     object EacWorklist     : Screen("eac_worklist")
     object PmtctWorklist   : Screen("pmtct_worklist")
+    object EidWorklist     : Screen("eid_worklist")
     object NoBiometric     : Screen("no_biometric")
     object PatientProfile  : Screen("patient/{patientId}") {
         fun createRoute(id: String) = "patient/$id"
@@ -100,6 +102,7 @@ fun AppNavHost(
         composable(Screen.Tpt.route)             { TptScreen(navController) }
         composable(Screen.EacWorklist.route)     { EacWorklistScreen(navController) }
         composable(Screen.PmtctWorklist.route)   { PmtctWorklistScreen(navController) }
+        composable(Screen.EidWorklist.route)     { EidWorklistScreen(navController) }
         composable(Screen.NoBiometric.route)     { UnregisteredBiometricScreen(navController) }
         composable(Screen.PatientProfile.route) { back ->
             val id = back.arguments?.getString("patientId") ?: return@composable

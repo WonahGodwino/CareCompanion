@@ -46,4 +46,5 @@ object DatabaseModule {
     @Provides fun provideReminderLogDao(db: AppDatabase): ReminderLogDao = db.reminderLogDao()
     @Provides fun provideEacEpisodeDao(db: AppDatabase): EacEpisodeDao = db.eacEpisodeDao()
     @Provides fun providePmtctRecordDao(db: AppDatabase): PmtctRecordDao = db.pmtctRecordDao()
+    @Provides fun provideInfantRecordDao(db: AppDatabase): InfantRecordDao = db.infantRecordDao()
 }

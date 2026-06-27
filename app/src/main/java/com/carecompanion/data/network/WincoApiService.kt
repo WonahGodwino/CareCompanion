@@ -6,6 +6,7 @@ import com.carecompanion.data.network.models.WincoBulkBiometricResponse
 import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoEacResponse
 import com.carecompanion.data.network.models.WincoPmtctWorklistResponse
+import com.carecompanion.data.network.models.WincoEidWorklistResponse
 import com.carecompanion.data.network.models.WincoClientPage
 import com.carecompanion.data.network.models.WincoFacility
 import com.carecompanion.data.network.models.WincoSummary
@@ -156,6 +157,11 @@ interface WincoApiService {
     suspend fun getPmtctWorklist(
         @Query("facility_id") facilityId: Long? = null,
     ): WincoPmtctWorklistResponse
+
+    @GET("api/art/eid/worklist")
+    suspend fun getEidWorklist(
+        @Query("facility_id") facilityId: Long? = null,
+    ): WincoEidWorklistResponse
 
     @GET("api/art/clients/{person_uuid}/pharmacy-history")
     suspend fun getPharmacyHistory(

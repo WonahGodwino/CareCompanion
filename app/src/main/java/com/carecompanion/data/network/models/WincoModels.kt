@@ -242,6 +242,37 @@ data class WincoPmtctGap(
     @SerializedName("message")  val message: String? = null,
 )
 
+// EID worklist — from GET /api/art/eid/worklist. HIV-exposed infants + high-risk + intervention gaps.
+data class WincoEidWorklistResponse(
+    @SerializedName("facility_id") val facilityId: Long? = null,
+    @SerializedName("count")       val count: Int = 0,
+    @SerializedName("high_risk")   val highRisk: Int = 0,
+    @SerializedName("with_gap")    val withGap: Int = 0,
+    @SerializedName("items")       val items: List<WincoInfantItem> = emptyList(),
+)
+
+data class WincoInfantItem(
+    @SerializedName("infant_uuid")         val infantUuid: String? = null,
+    @SerializedName("name")                val name: String? = null,
+    @SerializedName("hospital_number")     val hospitalNumber: String? = null,
+    @SerializedName("mother_person_uuid")  val motherPersonUuid: String? = null,
+    @SerializedName("anc_no")              val ancNo: String? = null,
+    @SerializedName("date_of_delivery")    val dateOfDelivery: String? = null,
+    @SerializedName("age_weeks")           val ageWeeks: Int? = null,
+    @SerializedName("age_months")          val ageMonths: Int? = null,
+    @SerializedName("high_risk")           val highRisk: Boolean = false,
+    @SerializedName("high_risk_reason")    val highRiskReason: String? = null,
+    @SerializedName("arv_given")           val arvGiven: Boolean = false,
+    @SerializedName("ctx_given")           val ctxGiven: Boolean = false,
+    @SerializedName("pcr_done")            val pcrDone: Boolean = false,
+    @SerializedName("pcr_result")          val pcrResult: String? = null,
+    @SerializedName("pcr_positive")        val pcrPositive: Boolean = false,
+    @SerializedName("pcr_result_received") val pcrResultReceived: Boolean = false,
+    @SerializedName("antibody_done")       val antibodyDone: Boolean = false,
+    @SerializedName("outcome_18m")         val outcome18m: String? = null,
+    @SerializedName("gaps")                val gaps: List<WincoPmtctGap> = emptyList(),
+)
+
 data class WincoTbScreeningSummary(
     @SerializedName("status")               val status: String? = null,
     @SerializedName("date")                 val date: String? = null,
