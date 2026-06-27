@@ -50,6 +50,7 @@ class SyncRepositoryImpl @Inject constructor(
     private val syncLogDao: SyncLogDao,
     private val viralLoadHistoryDao: ViralLoadHistoryDao,
     private val eacEpisodeDao: EacEpisodeDao,
+    private val pmtctRecordDao: com.carecompanion.data.database.dao.PmtctRecordDao,
 ) : SyncRepository {
 
     companion object {
@@ -769,6 +770,19 @@ class SyncRepositoryImpl @Inject constructor(
                         }
                     }
                 }
+
+                // Phase 6: PMTCT worklist — one bulk call returns currently-pregnant women + VL gaps.
+                onProgress?.invoke("Phase 6: Syncing PMTCT...")
+                try {
+                    val pmtct = retryWithBackoff { wincoApiService.getPmtctWorklist(null) }
+                    val records = pmtct.items.mapNotNull { it.toPmtctRecord() }
+                    db.withTransaction {
+                        pmtctRecordDao.clear()
+                        if (records.isNotEmpty()) pmtctRecordDao.insertAll(records)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "PMTCT worklist sync failed", e)
+                }
             }
 
             val now = DateUtils.formatIso8601(Date())
@@ -1013,6 +1027,28 @@ class SyncRepositoryImpl @Inject constructor(
             source = source,
             viralLoadIndication = viralLoadIndication,
             vlCategory = vlCategory,
+            lastSyncDate = Date(),
+        )
+    }
+
+    private fun com.carecompanion.data.network.models.WincoPmtctItem.toPmtctRecord(): com.carecompanion.data.database.entities.PmtctRecord? {
+        val pu = personUuid ?: return null
+        val anc = ancNo ?: return null
+        val gap = gaps.firstOrNull()
+        return com.carecompanion.data.database.entities.PmtctRecord(
+            personUuid = pu,
+            ancNo = anc,
+            name = name,
+            hospitalNumber = hospitalNumber,
+            lmp = DateUtils.parseDate(lmp),
+            edd = DateUtils.parseDate(edd),
+            gaWeeks = gaWeeks,
+            currentlyPregnant = currentlyPregnant,
+            pmtctVlDone = pmtctVlDone,
+            txCurr = txCurr,
+            gapType = gap?.type,
+            gapSeverity = gap?.severity,
+            gapMessage = gap?.message,
             lastSyncDate = Date(),
         )
     }

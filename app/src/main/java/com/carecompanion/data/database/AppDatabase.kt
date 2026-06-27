@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class,EacEpisode::class],version=19,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class,EacEpisode::class,PmtctRecord::class],version=20,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -22,6 +22,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun appUserDao(): AppUserDao
     abstract fun reminderLogDao(): ReminderLogDao
     abstract fun eacEpisodeDao(): EacEpisodeDao
+    abstract fun pmtctRecordDao(): PmtctRecordDao
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
@@ -239,10 +240,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // PMTCT worklist (currently-pregnant women + PMTCT VL gaps).
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `pmtct_record` (
+                        `personUuid` TEXT NOT NULL,
+                        `ancNo` TEXT NOT NULL,
+                        `name` TEXT,
+                        `hospitalNumber` TEXT,
+                        `lmp` INTEGER,
+                        `edd` INTEGER,
+                        `gaWeeks` INTEGER,
+                        `currentlyPregnant` INTEGER NOT NULL,
+                        `pmtctVlDone` INTEGER NOT NULL,
+                        `txCurr` INTEGER NOT NULL,
+                        `gapType` TEXT,
+                        `gapSeverity` TEXT,
+                        `gapMessage` TEXT,
+                        `lastSyncDate` INTEGER NOT NULL,
+                        PRIMARY KEY(`personUuid`, `ancNo`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_pmtct_record_personUuid` ON `pmtct_record` (`personUuid`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

@@ -5,6 +5,7 @@ import com.carecompanion.data.network.models.WincoBulkBiometricRequest
 import com.carecompanion.data.network.models.WincoBulkBiometricResponse
 import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoEacResponse
+import com.carecompanion.data.network.models.WincoPmtctWorklistResponse
 import com.carecompanion.data.network.models.WincoClientPage
 import com.carecompanion.data.network.models.WincoFacility
 import com.carecompanion.data.network.models.WincoSummary
@@ -150,6 +151,11 @@ interface WincoApiService {
     suspend fun getEac(
         @Path("person_uuid") personUuid: String,
     ): WincoEacResponse
+
+    @GET("api/art/pmtct/worklist")
+    suspend fun getPmtctWorklist(
+        @Query("facility_id") facilityId: Long? = null,
+    ): WincoPmtctWorklistResponse
 
     @GET("api/art/clients/{person_uuid}/pharmacy-history")
     suspend fun getPharmacyHistory(

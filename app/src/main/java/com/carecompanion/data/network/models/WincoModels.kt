@@ -214,6 +214,34 @@ data class WincoEacEpisode(
     @SerializedName("regimen_switched") val regimenSwitched: Boolean = false,
 )
 
+// PMTCT worklist — from GET /api/art/pmtct/worklist. Currently-pregnant women with GA + PMTCT VL gaps.
+data class WincoPmtctWorklistResponse(
+    @SerializedName("facility_id") val facilityId: Long? = null,
+    @SerializedName("count")       val count: Int = 0,
+    @SerializedName("with_gap")    val withGap: Int = 0,
+    @SerializedName("items")       val items: List<WincoPmtctItem> = emptyList(),
+)
+
+data class WincoPmtctItem(
+    @SerializedName("person_uuid")        val personUuid: String? = null,
+    @SerializedName("name")               val name: String? = null,
+    @SerializedName("hospital_number")    val hospitalNumber: String? = null,
+    @SerializedName("anc_no")             val ancNo: String? = null,
+    @SerializedName("lmp")                val lmp: String? = null,
+    @SerializedName("edd")                val edd: String? = null,
+    @SerializedName("ga_weeks")           val gaWeeks: Int? = null,
+    @SerializedName("currently_pregnant") val currentlyPregnant: Boolean = false,
+    @SerializedName("pmtct_vl_done")      val pmtctVlDone: Boolean = false,
+    @SerializedName("tx_curr")            val txCurr: Boolean = false,
+    @SerializedName("gaps")               val gaps: List<WincoPmtctGap> = emptyList(),
+)
+
+data class WincoPmtctGap(
+    @SerializedName("type")     val type: String? = null,
+    @SerializedName("severity") val severity: String? = null,
+    @SerializedName("message")  val message: String? = null,
+)
+
 data class WincoTbScreeningSummary(
     @SerializedName("status")               val status: String? = null,
     @SerializedName("date")                 val date: String? = null,

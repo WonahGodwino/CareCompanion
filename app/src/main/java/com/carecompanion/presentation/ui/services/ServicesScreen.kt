@@ -93,6 +93,15 @@ private fun serviceModules() = listOf(
         route         = Screen.EacWorklist.route
     ),
     ServiceModule(
+        title         = "PMTCT — Maternal Viral Load",
+        description   = "Currently-pregnant clients and their PMTCT viral load status. Flags the 32–36 week gestation VL (due/overdue) to reduce mother-to-child transmission risk.",
+        icon          = Icons.Default.PregnantWoman,
+        accentColor   = Color(0xFF00838F),
+        onAccentColor = Color(0xFFE0F7FA),
+        available     = true,
+        route         = Screen.PmtctWorklist.route
+    ),
+    ServiceModule(
         title         = "VL Cascade — PEPFAR 95-95-95",
         description   = "Viral load cascade dashboard: TX_CURR · VL Tested · Results Received · Suppressed. Track facility suppression rate against the 95% PEPFAR target.",
         icon          = Icons.Default.BarChart,
