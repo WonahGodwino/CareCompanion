@@ -402,7 +402,9 @@ class SyncRepositoryImpl @Inject constructor(
             return SyncResult.NotConfigured
         }
         
-        val facilityId: Long? = null
+        // Facility scope (multi-tenancy): the active facility drives the whole sync — client fetch,
+        // per-patient detail, and cohort worklists — so a multi-facility node isolates each facility.
+        val facilityId: Long? = SharedPreferencesHelper.getActiveFacilityId(context).takeIf { it > 0L }
         val includeTxMl = SharedPreferencesHelper.isTxMlIncludeEnabled(context)
         val txMlStartDate = SharedPreferencesHelper.getTxMlStartDate(context).trim().ifBlank { null }
         val txMlEndDate = SharedPreferencesHelper.getTxMlEndDate(context).trim().ifBlank { null }
@@ -694,7 +696,7 @@ class SyncRepositoryImpl @Inject constructor(
                         chunk.map { patient ->
                             async {
                                 try {
-                                    val resp = retryWithBackoff { wincoApiService.getViralLoadHistory(patient.uuid) }
+                                    val resp = retryWithBackoff { wincoApiService.getViralLoadHistory(patient.uuid, facilityId) }
                                     Pair(patient.uuid, resp.items.mapNotNull { it.toViralLoadHistory(patient.uuid) })
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to fetch VL history for ${patient.uuid}", e)
@@ -722,7 +724,7 @@ class SyncRepositoryImpl @Inject constructor(
                         chunk.map { patient ->
                             async {
                                 try {
-                                    val resp = retryWithBackoff { wincoApiService.getPharmacyHistory(patient.uuid) }
+                                    val resp = retryWithBackoff { wincoApiService.getPharmacyHistory(patient.uuid, facilityId) }
                                     Pair(patient.uuid, resp.items.mapNotNull { it.toArtPharmacy(patient.uuid) })
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to fetch pharmacy history for ${patient.uuid}", e)
@@ -754,7 +756,7 @@ class SyncRepositoryImpl @Inject constructor(
                             chunk.map { patient ->
                                 async {
                                     try {
-                                        val resp = retryWithBackoff { wincoApiService.getEac(patient.uuid) }
+                                        val resp = retryWithBackoff { wincoApiService.getEac(patient.uuid, facilityId) }
                                         Pair(patient.uuid, resp.episodes.mapNotNull { it.toEacEpisode(patient.uuid) })
                                     } catch (e: Exception) {
                                         null  // 404 for non-ART / no EAC is expected; skip
@@ -771,10 +773,6 @@ class SyncRepositoryImpl @Inject constructor(
                         }
                     }
                 }
-
-                // Facility scope (multi-tenancy): pass this device's facility to every cohort endpoint.
-                val facilityId = com.carecompanion.utils.SharedPreferencesHelper
-                    .getActiveFacilityId(context).takeIf { it > 0L }
 
                 // Phase 6: PMTCT worklist — one bulk call returns currently-pregnant women + VL gaps.
                 onProgress?.invoke("Phase 6: Syncing PMTCT...")

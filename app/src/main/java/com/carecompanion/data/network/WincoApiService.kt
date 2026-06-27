@@ -146,11 +146,13 @@ interface WincoApiService {
     @GET("api/art/clients/{person_uuid}/viral-load-history")
     suspend fun getViralLoadHistory(
         @Path("person_uuid") personUuid: String,
+        @Query("facility_id") facilityId: Long? = null,
     ): WincoViralLoadHistoryResponse
 
     @GET("api/art/clients/{person_uuid}/eac")
     suspend fun getEac(
         @Path("person_uuid") personUuid: String,
+        @Query("facility_id") facilityId: Long? = null,
     ): WincoEacResponse
 
     @GET("api/art/pmtct/worklist")
@@ -166,6 +168,7 @@ interface WincoApiService {
     @GET("api/art/clients/{person_uuid}/pharmacy-history")
     suspend fun getPharmacyHistory(
         @Path("person_uuid") personUuid: String,
+        @Query("facility_id") facilityId: Long? = null,
     ): WincoPharmacyHistoryResponse
 
     /**
