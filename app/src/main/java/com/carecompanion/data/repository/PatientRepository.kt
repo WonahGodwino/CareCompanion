@@ -62,6 +62,7 @@ interface PatientRepository {
     // ── VL Cascade counts ──────────────────────────────────────────────────────
     fun observeTxCurrCount(todayMs: Long): Flow<Int>
     fun observeTxCurrCountByFacility(todayMs: Long, facilityId: Long): Flow<Int>
+    fun observeUnsuppressedTxCurr(todayMs: Long): Flow<List<com.carecompanion.data.database.entities.Patient>>
     fun observeVlTestedCount(todayMs: Long): Flow<Int>
     fun observeVlResultReceivedCount(todayMs: Long): Flow<Int>
     fun observeVlSuppressedCount(todayMs: Long): Flow<Int>

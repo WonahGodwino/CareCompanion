@@ -128,6 +128,21 @@ interface PatientDao {
     """)
     fun observeTxCurrCountByFacility(todayMs: Long, facilityId: Long): kotlinx.coroutines.flow.Flow<Int>
 
+    // EAC-relevant cohort: TX_CURR clients whose latest VL is unsuppressed (>=1000). Every member is
+    // active, so EacGapEngine runs with isTxCurr = true. Drives the EAC worklist.
+    @Query("""
+        SELECT p.* FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE (p.deceased IS NULL OR p.deceased = 0)
+          AND UPPER(REPLACE(REPLACE(COALESCE(p.currentStatus,''),' ','_'),'-','_'))
+              IN ('ACTIVE','IIT','ART','ART_START','ART_TRANSFER_IN','ACTIVE_TX_CURR')
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND (ap.visitDate + ((COALESCE(ap.refillPeriod,0) + 28) * 86400000)) >= :todayMs
+          AND p.lastViralLoadResult IS NOT NULL AND p.lastViralLoadResult >= 1000
+        ORDER BY p.lastViralLoadResult DESC
+    """)
+    fun observeUnsuppressedTxCurr(todayMs: Long): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.Patient>>
+
     @Query("""
         SELECT COUNT(DISTINCT p.uuid) FROM patient_person p
         INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid

@@ -84,6 +84,7 @@ class PatientRepositoryImpl @Inject constructor(
     // ── VL Cascade counts ──────────────────────────────────────────────────────
     override fun observeTxCurrCount(todayMs: Long) = patientDao.observeTxCurrCount(todayMs)
     override fun observeTxCurrCountByFacility(todayMs: Long, facilityId: Long) = patientDao.observeTxCurrCountByFacility(todayMs, facilityId)
+    override fun observeUnsuppressedTxCurr(todayMs: Long) = patientDao.observeUnsuppressedTxCurr(todayMs)
     override fun observeVlTestedCount(todayMs: Long) = patientDao.observeVlTestedCount(todayMs)
     override fun observeVlResultReceivedCount(todayMs: Long) = patientDao.observeVlResultReceivedCount(todayMs)
     override fun observeVlSuppressedCount(todayMs: Long) = patientDao.observeVlSuppressedCount(todayMs)
