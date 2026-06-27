@@ -9,17 +9,25 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import java.util.Date
+import java.util.Properties
 
 android {
     val buildTimeUtc = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }
         .format(Date())
+    // Secrets from gitignored local.properties (never committed).
+    val localProps = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    val termiiApiKey = localProps.getProperty("TERMII_API_KEY", "")
     namespace = "com.carecompanion"
     compileSdk = 34
     defaultConfig {
         applicationId = "com.carecompanion"
         minSdk = 24; targetSdk = 34; versionCode = 3; versionName = "1.0.2"
         buildConfigField("String", "BUILD_TIME_UTC", "\"$buildTimeUtc\"")
+        buildConfigField("String", "TERMII_API_KEY", "\"$termiiApiKey\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // SecuGen FDx SDK Pro ships arm64-v8a, armeabi-v7a, x86, x86_64 .so files
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }

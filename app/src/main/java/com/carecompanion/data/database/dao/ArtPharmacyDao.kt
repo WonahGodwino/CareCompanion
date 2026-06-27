@@ -316,6 +316,85 @@ interface ArtPharmacyDao {
 
     @Query("DELETE FROM art_pharmacy") suspend fun deleteAll()
 
+    // ── Today's Clinic Worklist ────────────────────────────────────────────────
+    // Patients whose nextAppointment falls within the current calendar day (WAT).
+    // Carries all fields needed to compute due services (VL, TB, biometric) in one trip.
+
+    @Query("""
+        SELECT
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.artStartDate,
+            p.lastViralLoadDate,
+            p.lastViralLoadResult,
+            p.lastTbScreeningDate,
+            p.lastTbScreeningStatus,
+            p.ndrMatchedStatus,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.refillPeriod,
+            ap.regimenId,
+            ap.dsdModel,
+            (SELECT COUNT(*) FROM biometric b
+             WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0) AS biometricCount,
+            (SELECT MAX(COALESCE(b.lastModifiedDate, b.enrollmentDate, b.lastSyncDate))
+             FROM biometric b
+             WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0) AS lastBiometricDate
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND ap.nextAppointment IS NOT NULL
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND ap.nextAppointment >= :startOfDayMs
+          AND ap.nextAppointment < :endOfDayMs
+        GROUP BY p.uuid
+        ORDER BY ap.nextAppointment ASC
+    """)
+    fun observeTodayWorklist(startOfDayMs: Long, endOfDayMs: Long): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.WorklistEntry>>
+
+    @Query("""
+        SELECT
+            p.uuid,
+            p.hospitalNumber,
+            p.firstName,
+            p.surname,
+            p.fullName,
+            p.sex,
+            p.dateOfBirth,
+            p.artStartDate,
+            p.lastViralLoadDate,
+            p.lastViralLoadResult,
+            p.lastTbScreeningDate,
+            p.lastTbScreeningStatus,
+            p.ndrMatchedStatus,
+            ap.visitDate    AS lastVisitDate,
+            ap.nextAppointment,
+            ap.refillPeriod,
+            ap.regimenId,
+            ap.dsdModel,
+            (SELECT COUNT(*) FROM biometric b
+             WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0) AS biometricCount,
+            (SELECT MAX(COALESCE(b.lastModifiedDate, b.enrollmentDate, b.lastSyncDate))
+             FROM biometric b
+             WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0) AS lastBiometricDate
+        FROM patient_person p
+        INNER JOIN art_pharmacy ap ON p.uuid = ap.personUuid
+        WHERE p.isActive = 1
+          AND p.facilityId = :facilityId
+          AND ap.nextAppointment IS NOT NULL
+          AND ap.visitDate = (SELECT MAX(visitDate) FROM art_pharmacy WHERE personUuid = p.uuid)
+          AND ap.nextAppointment >= :startOfDayMs
+          AND ap.nextAppointment < :endOfDayMs
+        GROUP BY p.uuid
+        ORDER BY ap.nextAppointment ASC
+    """)
+    fun observeTodayWorklistByFacility(startOfDayMs: Long, endOfDayMs: Long, facilityId: Long): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.WorklistEntry>>
+
     // ── ART Refill queries ─────────────────────────────────────────────────────
     // Returns ALL active ART patients with their latest pharmacy record (no overdue
     // filter). Eligibility grouping is computed in the ViewModel using

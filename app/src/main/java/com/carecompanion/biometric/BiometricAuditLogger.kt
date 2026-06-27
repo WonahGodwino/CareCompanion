@@ -309,18 +309,15 @@ object BiometricAuditLogger {
     }
 
     /**
-     * Persists audit log to local database.
-     * Future enhancement: Implement BiometricAuditLog table in AppDatabase.
-     *
-     * @param eventType Type of event for filtering/searching
-     * @param message Full log message
+     * Persists audit log to a dated file on device storage.
+     * Files are written to: Android/data/com.carecompanion/files/biometric_logs/
      */
     private fun persistToDatabase(eventType: String, message: String) {
-        // TODO: Implement persistence to BiometricAuditLog table
-        // This will enable:
-        // - Local audit trail for compliance reporting
-        // - Performance analysis (query by eventType, date range, facility)
-        // - Forensic investigation of biometric failures
-        // - Optional sync to secure backend for centralized monitoring
+        val level = when (eventType) {
+            "SCANNER_ERROR" -> "ERROR"
+            "SECURITY_ALERT" -> "WARN"
+            else -> "INFO"
+        }
+        BiometricFileLogger.write(level = level, event = eventType, details = message)
     }
 }

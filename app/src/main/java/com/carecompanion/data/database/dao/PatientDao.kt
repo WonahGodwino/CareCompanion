@@ -46,4 +46,120 @@ interface PatientDao {
     @Query("SELECT COUNT(*) FROM patient_person WHERE isActive = 1 AND facilityId = :facilityId") fun observeActiveCountByFacility(facilityId: Long): Flow<Int>
 
     @Query("DELETE FROM patient_person") suspend fun deleteAll()
+
+    // ── Patients without any active biometric ──────────────────────────────────
+
+    @Query("""
+        SELECT
+            p.uuid, p.hospitalNumber, p.firstName, p.surname, p.fullName,
+            p.sex, p.dateOfBirth, p.currentStatus, p.artStartDate, p.facilityId
+        FROM patient_person p
+        WHERE p.isActive = 1
+          AND NOT EXISTS (
+              SELECT 1 FROM biometric b
+              WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0
+          )
+        ORDER BY p.surname, p.firstName
+    """)
+    fun observeNoBiometricPatients(): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.NoBiometricEntry>>
+
+    @Query("""
+        SELECT
+            p.uuid, p.hospitalNumber, p.firstName, p.surname, p.fullName,
+            p.sex, p.dateOfBirth, p.currentStatus, p.artStartDate, p.facilityId
+        FROM patient_person p
+        WHERE p.isActive = 1
+          AND p.facilityId = :facilityId
+          AND NOT EXISTS (
+              SELECT 1 FROM biometric b
+              WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0
+          )
+        ORDER BY p.surname, p.firstName
+    """)
+    fun observeNoBiometricPatientsByFacility(facilityId: Long): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.NoBiometricEntry>>
+
+    @Query("""
+        SELECT
+            p.uuid, p.hospitalNumber, p.firstName, p.surname, p.fullName,
+            p.sex, p.dateOfBirth, p.currentStatus, p.artStartDate, p.facilityId
+        FROM patient_person p
+        WHERE p.isActive = 1
+          AND NOT EXISTS (
+              SELECT 1 FROM biometric b
+              WHERE b.personUuid = p.uuid AND COALESCE(b.archived,0) = 0
+          )
+          AND (
+              p.hospitalNumber LIKE '%' || :q || '%'
+              OR p.firstName   LIKE '%' || :q || '%'
+              OR p.surname     LIKE '%' || :q || '%'
+              OR p.fullName    LIKE '%' || :q || '%'
+          )
+        ORDER BY p.surname, p.firstName
+    """)
+    fun observeNoBiometricSearch(q: String): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.NoBiometricEntry>>
+
+    // ── VL Cascade counts (reactive) ───────────────────────────────────────────
+
+    @Query("SELECT COUNT(*) FROM patient_person WHERE isActive = 1")
+    fun observeTxCurrCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM patient_person WHERE isActive = 1 AND lastViralLoadDate IS NOT NULL")
+    fun observeVlTestedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM patient_person
+        WHERE isActive = 1
+          AND lastViralLoadDate IS NOT NULL
+          AND (lastViralLoadResult IS NOT NULL OR lastViralLoadResultRaw IS NOT NULL)
+    """)
+    fun observeVlResultReceivedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM patient_person
+        WHERE isActive = 1 AND lastViralLoadResult IS NOT NULL AND lastViralLoadResult < 1000
+    """)
+    fun observeVlSuppressedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM patient_person
+        WHERE isActive = 1 AND lastViralLoadResult IS NOT NULL AND lastViralLoadResult >= 1000
+    """)
+    fun observeVlUnsuppressedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    // ── TPT screen — active ART patients with TB screening data ───────────────
+
+    @Query("""
+        SELECT
+            p.uuid, p.hospitalNumber, p.firstName, p.surname, p.fullName,
+            p.sex, p.dateOfBirth, p.currentStatus, p.artStartDate,
+            p.lastTbScreeningDate, p.lastTbScreeningStatus,
+            p.facilityId,
+            (SELECT ap.iptType FROM art_pharmacy ap WHERE ap.personUuid = p.uuid
+             ORDER BY ap.visitDate DESC LIMIT 1) AS iptType
+        FROM patient_person p
+        WHERE p.isActive = 1
+        ORDER BY
+            CASE WHEN p.lastTbScreeningDate IS NULL THEN 0 ELSE 1 END,
+            p.lastTbScreeningDate ASC,
+            p.surname, p.firstName
+    """)
+    fun observeTptPatients(): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.TptEntry>>
+
+    @Query("""
+        SELECT
+            p.uuid, p.hospitalNumber, p.firstName, p.surname, p.fullName,
+            p.sex, p.dateOfBirth, p.currentStatus, p.artStartDate,
+            p.lastTbScreeningDate, p.lastTbScreeningStatus,
+            p.facilityId,
+            (SELECT ap.iptType FROM art_pharmacy ap WHERE ap.personUuid = p.uuid
+             ORDER BY ap.visitDate DESC LIMIT 1) AS iptType
+        FROM patient_person p
+        WHERE p.isActive = 1
+          AND p.facilityId = :facilityId
+        ORDER BY
+            CASE WHEN p.lastTbScreeningDate IS NULL THEN 0 ELSE 1 END,
+            p.lastTbScreeningDate ASC,
+            p.surname, p.firstName
+    """)
+    fun observeTptPatientsByFacility(facilityId: Long): kotlinx.coroutines.flow.Flow<List<com.carecompanion.data.database.entities.TptEntry>>
 }

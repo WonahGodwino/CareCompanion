@@ -46,6 +46,19 @@ class SecuGenScanner(
     private val securityLevel: Int  = SecuGenSecurityLevel.SL_NORMAL
 ) : BiometricScanner {
 
+    /**
+     * Captures a fingerprint and returns both the canonicalized template and its SHA-256 hash.
+     * The hash is always computed from the canonicalized template (ISO19794).
+     */
+    suspend fun captureFingerprintWithHash(timeoutSeconds: Int): Pair<ByteArray, String>? =
+        withContext(Dispatchers.IO) {
+            val template = captureFingerprint(timeoutSeconds)
+            if (template == null) return@withContext null
+            val canonical = BiometricTemplateNormalizer.canonicalize(template)
+            val hash = com.carecompanion.data.repository.SyncRepositoryImpl.sha256Hex(canonical)
+            Pair(canonical, hash)
+        }
+
     companion object {
         private const val TAG = "SecuGenScanner"
     }
@@ -68,20 +81,21 @@ class SecuGenScanner(
         return try {
             val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
 
-            // 1. Create SDK instance – constructor calls Open() internally
+            // 1. Create SDK instance
             val lib = JSGFPLib(context, usbManager)
             check(lib.GetJniLoadStatus(), "JniLoad")
 
-            // 2. Set the template format before opening the device
-            check(lib.SetTemplateFormat(templateFormat.toShort()), "SetTemplateFormat")
-
-            // 3. Initialise the SDK with auto device-type detection
+            // 2. Init must come before SetTemplateFormat — Init resets SDK state and would
+            //    silently discard any format set earlier.
             check(lib.Init(SGFDxDeviceName.SG_DEV_AUTO), "Init")
 
-            // 4. Open the physical USB device (index 0 = first attached SecuGen device).
+            // 3. Open the physical USB device (index 0 = first attached SecuGen device).
             //    Permission must already be granted (ensured by BiometricManager before
             //    this call). Without OpenDevice() GetDeviceInfo() and all capture calls fail.
             check(lib.OpenDevice(0), "OpenDevice")
+
+            // 4. Set template format AFTER device is open — this is when the setting sticks.
+            check(lib.SetTemplateFormat(templateFormat.toShort()), "SetTemplateFormat")
 
             sgfpm = lib
 

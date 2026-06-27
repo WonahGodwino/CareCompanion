@@ -1,4 +1,4 @@
-﻿package com.carecompanion.di
+package com.carecompanion.di
 
 import android.content.Context
 import androidx.room.Room
@@ -28,6 +28,10 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -38,4 +42,6 @@ object DatabaseModule {
     @Provides fun provideSyncLogDao(db: AppDatabase): SyncLogDao = db.syncLogDao()
     @Provides fun provideFacilityDao(db: AppDatabase): FacilityDao = db.facilityDao()
     @Provides fun provideViralLoadHistoryDao(db: AppDatabase): ViralLoadHistoryDao = db.viralLoadHistoryDao()
+    @Provides fun provideAppUserDao(db: AppDatabase): AppUserDao = db.appUserDao()
+    @Provides fun provideReminderLogDao(db: AppDatabase): ReminderLogDao = db.reminderLogDao()
 }

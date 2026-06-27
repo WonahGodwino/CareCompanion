@@ -3,8 +3,11 @@
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
+import com.carecompanion.data.database.entities.NoBiometricEntry
 import com.carecompanion.data.database.entities.Patient
+import com.carecompanion.data.database.entities.TptEntry
 import com.carecompanion.data.database.entities.ViralLoadHistory
+import com.carecompanion.data.database.entities.WorklistEntry
 import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
@@ -19,6 +22,7 @@ interface PatientRepository {
     suspend fun getBiometricsForPatient(personUuid: String): List<Biometric>
     suspend fun getAllBiometrics(): List<Biometric>
     suspend fun getArtPharmacyForPatient(personUuid: String): List<ArtPharmacy>
+    suspend fun getArtPharmacyForPatients(personUuids: List<String>): List<ArtPharmacy>
     suspend fun getPatientCount(): Int
     suspend fun getBiometricCount(): Int
     // Reactive flows — Room emits a new list whenever the table changes
@@ -44,4 +48,25 @@ interface PatientRepository {
     fun observeArtRefillSearchByFacility(q: String, facilityId: Long): Flow<List<IITClient>>
 
     suspend fun getViralLoadHistory(personUuid: String): List<ViralLoadHistory>
+    suspend fun getViralLoadHistoryForPatients(personUuids: List<String>): List<ViralLoadHistory>
+
+    // ── Today's worklist ───────────────────────────────────────────────────────
+    fun observeTodayWorklist(startOfDayMs: Long, endOfDayMs: Long): Flow<List<WorklistEntry>>
+    fun observeTodayWorklistByFacility(startOfDayMs: Long, endOfDayMs: Long, facilityId: Long): Flow<List<WorklistEntry>>
+
+    // ── Patients without biometrics ────────────────────────────────────────────
+    fun observeNoBiometricPatients(): Flow<List<NoBiometricEntry>>
+    fun observeNoBiometricPatientsByFacility(facilityId: Long): Flow<List<NoBiometricEntry>>
+    fun observeNoBiometricSearch(q: String): Flow<List<NoBiometricEntry>>
+
+    // ── VL Cascade counts ──────────────────────────────────────────────────────
+    fun observeTxCurrCount(): Flow<Int>
+    fun observeVlTestedCount(): Flow<Int>
+    fun observeVlResultReceivedCount(): Flow<Int>
+    fun observeVlSuppressedCount(): Flow<Int>
+    fun observeVlUnsuppressedCount(): Flow<Int>
+
+    // ── TPT ────────────────────────────────────────────────────────────────────
+    fun observeTptPatients(): Flow<List<TptEntry>>
+    fun observeTptPatientsByFacility(facilityId: Long): Flow<List<TptEntry>>
 }

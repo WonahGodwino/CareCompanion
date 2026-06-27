@@ -7,8 +7,11 @@ import com.carecompanion.data.database.dao.ViralLoadHistoryDao
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.IITClient
+import com.carecompanion.data.database.entities.NoBiometricEntry
 import com.carecompanion.data.database.entities.Patient
+import com.carecompanion.data.database.entities.TptEntry
 import com.carecompanion.data.database.entities.ViralLoadHistory
+import com.carecompanion.data.database.entities.WorklistEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Date
@@ -29,6 +32,7 @@ class PatientRepositoryImpl @Inject constructor(
     override suspend fun getBiometricsForPatient(personUuid: String) = biometricDao.getByPersonUuid(personUuid)
     override suspend fun getAllBiometrics() = biometricDao.getAll()
     override suspend fun getArtPharmacyForPatient(personUuid: String) = artPharmacyDao.getByPersonUuid(personUuid)
+    override suspend fun getArtPharmacyForPatients(personUuids: List<String>) = artPharmacyDao.getByPersonUuids(personUuids)
     override suspend fun getPatientCount() = patientDao.getActiveCount()
     override suspend fun getBiometricCount() = biometricDao.getCount()
     override fun observeAllActive() = patientDao.observeAllActive()
@@ -57,7 +61,34 @@ class PatientRepositoryImpl @Inject constructor(
         viralLoadHistoryDao.getByPersonUuid(personUuid)
     }
 
+    override suspend fun getViralLoadHistoryForPatients(personUuids: List<String>): List<ViralLoadHistory> = withContext(Dispatchers.IO) {
+        if (personUuids.isEmpty()) emptyList() else viralLoadHistoryDao.getByPersonUuids(personUuids)
+    }
+
     override suspend fun saveBiometric(biometric: Biometric) = withContext(Dispatchers.IO) {
         biometricDao.insert(biometric)
     }
+
+    // ── Today's worklist ───────────────────────────────────────────────────────
+    override fun observeTodayWorklist(startOfDayMs: Long, endOfDayMs: Long) =
+        artPharmacyDao.observeTodayWorklist(startOfDayMs, endOfDayMs)
+
+    override fun observeTodayWorklistByFacility(startOfDayMs: Long, endOfDayMs: Long, facilityId: Long) =
+        artPharmacyDao.observeTodayWorklistByFacility(startOfDayMs, endOfDayMs, facilityId)
+
+    // ── Patients without biometrics ────────────────────────────────────────────
+    override fun observeNoBiometricPatients() = patientDao.observeNoBiometricPatients()
+    override fun observeNoBiometricPatientsByFacility(facilityId: Long) = patientDao.observeNoBiometricPatientsByFacility(facilityId)
+    override fun observeNoBiometricSearch(q: String) = patientDao.observeNoBiometricSearch(q)
+
+    // ── VL Cascade counts ──────────────────────────────────────────────────────
+    override fun observeTxCurrCount() = patientDao.observeTxCurrCount()
+    override fun observeVlTestedCount() = patientDao.observeVlTestedCount()
+    override fun observeVlResultReceivedCount() = patientDao.observeVlResultReceivedCount()
+    override fun observeVlSuppressedCount() = patientDao.observeVlSuppressedCount()
+    override fun observeVlUnsuppressedCount() = patientDao.observeVlUnsuppressedCount()
+
+    // ── TPT ────────────────────────────────────────────────────────────────────
+    override fun observeTptPatients() = patientDao.observeTptPatients()
+    override fun observeTptPatientsByFacility(facilityId: Long) = patientDao.observeTptPatientsByFacility(facilityId)
 }

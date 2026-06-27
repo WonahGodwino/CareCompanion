@@ -12,6 +12,9 @@ externalNativeBuild/
 
 # Local machine configuration
 local.properties
+.claude/
+.gradle-local/
+build_log.txt
 
 # Security-sensitive signing and key material
 *.jks
@@ -52,3 +55,4 @@ temp_api.json
 # OS files
 .DS_Store
 Thumbs.db
+.claude

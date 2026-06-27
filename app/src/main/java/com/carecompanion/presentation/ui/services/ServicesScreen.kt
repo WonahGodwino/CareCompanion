@@ -75,11 +75,31 @@ private fun serviceModules() = listOf(
         route         = Screen.ViralLoad.route
     ),
     ServiceModule(
-        title         = "TPT",
-        description   = "Manage Tuberculosis Preventive Therapy eligibility, initiation, and completion tracking.",
+        title         = "TPT — TB Preventive Therapy",
+        description   = "Manage TB Preventive Therapy screening, eligibility, initiation, and completion tracking. Grouped by status: Not Screened · Eligible · On IPT · TB Positive.",
         icon          = Icons.Default.HealthAndSafety,
         accentColor   = Color(0xFF00695C),
         onAccentColor = Color(0xFFE0F2F1),
+        available     = true,
+        route         = Screen.Tpt.route
+    ),
+    ServiceModule(
+        title         = "VL Cascade — PEPFAR 95-95-95",
+        description   = "Viral load cascade dashboard: TX_CURR · VL Tested · Results Received · Suppressed. Track facility suppression rate against the 95% PEPFAR target.",
+        icon          = Icons.Default.BarChart,
+        accentColor   = Color(0xFF6A1B9A),
+        onAccentColor = Color(0xFFF3E5F5),
+        available     = true,
+        route         = Screen.VlCascade.route
+    ),
+    ServiceModule(
+        title         = "Biometric Enrollment Gap",
+        description   = "Clients without any biometric enrolled. Prioritise enrollment during next clinic visit to ensure accurate PEPFAR deduplication coverage.",
+        icon          = Icons.Default.Fingerprint,
+        accentColor   = Color(0xFFC62828),
+        onAccentColor = Color(0xFFFFEBEE),
+        available     = true,
+        route         = Screen.NoBiometric.route
     ),
     ServiceModule(
         title         = "TB",
@@ -90,7 +110,7 @@ private fun serviceModules() = listOf(
     ),
     ServiceModule(
         title         = "AHD",
-        description   = "Identify and manage clients with Advanced HIV Disease for prioritised clinical care.",
+        description   = "Identify and manage clients with Advanced HIV Disease (VL < 200 copies/mL) for prioritised clinical care.",
         icon          = Icons.Default.MonitorHeart,
         accentColor   = Color(0xFF4A148C),
         onAccentColor = Color(0xFFF3E5F5),

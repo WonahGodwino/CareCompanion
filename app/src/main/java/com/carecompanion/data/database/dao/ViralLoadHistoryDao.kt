@@ -28,4 +28,14 @@ interface ViralLoadHistoryDao {
         """
     )
     suspend fun getByPersonUuid(personUuid: String): List<ViralLoadHistory>
+
+    @Query(
+        """
+        SELECT *
+        FROM viral_load_history
+        WHERE personUuid IN (:personUuids)
+        ORDER BY personUuid, resultDate, assayedDate, sampleDate
+        """
+    )
+    suspend fun getByPersonUuids(personUuids: List<String>): List<ViralLoadHistory>
 }

@@ -14,6 +14,7 @@ import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.data.repository.PatientRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -110,7 +111,7 @@ class VerifyViewModel @Inject constructor(
         }
         // Guard against rapid double-tap: only one scan operation at a time (Issue 3 fix)
         if (!isScanInProgress.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(step = VerifyStep.SCANNING) }
             try {
                 val template = biometricManager.captureFingerprint(timeoutSeconds = 30)
@@ -126,8 +127,9 @@ class VerifyViewModel @Inject constructor(
                         errorMessage = "Image quality too low (${e.quality}/100) after ${e.attempts} attempts. " +
                             "Clean your finger and the scanner glass, then retry.")
                 }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = e.message ?: "Scanner error") }
+            } catch (e: Throwable) {
+                android.util.Log.e("VerifyViewModel", "startScan fatal error", e)
+                _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = "${e.javaClass.simpleName}: ${e.message ?: "Unknown error"}") }
             } finally {
                 isScanInProgress.set(false)
             }
@@ -137,22 +139,21 @@ class VerifyViewModel @Inject constructor(
     private suspend fun onFingerprintCaptured(template: ByteArray, selectedPatient: Patient, selectedFinger: FingerType) {
         _uiState.update { it.copy(step = VerifyStep.MATCHING) }
         try {
-            val matchResult = (syncRepository as? com.carecompanion.data.repository.SyncRepositoryImpl)?.verifyBiometric(
+            // Pass the vendor SDK as the scorer when the scanner is online.
+            // The repository runs the single 1:1 loop, deduplicates by hash, and uses the
+            // custom matcher automatically when sdkMatcher is null (offline / scanner absent).
+            val sdkMatcherFn: ((ByteArray, ByteArray) -> Double)? =
+                if (biometricManager.isReady()) { probe, ref -> biometricManager.match(probe, ref).score }
+                else null
+
+            val matchResult = syncRepository.verifyBiometric(
                 capturedTemplate = template,
                 personUuid = selectedPatient.uuid,
                 fingerType = selectedFinger.name,
-                facilityId = selectedPatient.facilityId
+                facilityId = selectedPatient.facilityId,
+                sdkMatcher = sdkMatcherFn
             )
             val isMatch = matchResult?.patient != null && matchResult.template != null
-            // Audit log every attempt — failures are required for NPHCDA compliance (Issue 7 fix)
-            com.carecompanion.biometric.BiometricAuditLogger.logVerification(
-                patientUuid = selectedPatient.uuid,
-                fingerType = selectedFinger.name,
-                matchScore = (matchResult?.confidence ?: 0.0) * 100.0,
-                isMatch = isMatch,
-                matchThreshold = 55.0,
-                method = "REPOSITORY"
-            )
             if (isMatch) {
                 _uiState.update {
                     it.copy(
@@ -164,44 +165,10 @@ class VerifyViewModel @Inject constructor(
                 return
             }
             _uiState.update { it.copy(step = VerifyStep.NO_MATCH, matchScore = (matchResult?.confidence ?: 0.0) * 100.0) }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = e.message) }
+        } catch (e: Throwable) {
+            android.util.Log.e("VerifyViewModel", "onFingerprintCaptured fatal error", e)
+            _uiState.update { it.copy(step = VerifyStep.ERROR, errorMessage = "${e.javaClass.simpleName}: ${e.message}") }
         }
-    }
-
-    private suspend fun runSdkVerificationFallback(
-        probe: ByteArray,
-        selectedPatient: Patient,
-        selectedFinger: FingerType
-    ): Triple<Patient, Biometric, Double>? {
-        val gallery = patientRepository.getBiometricsForPatient(selectedPatient.uuid)
-            .filter { matchesSelectedFinger(it, selectedFinger) }
-        val best = findBestMatch(probe, gallery) ?: return null
-        return Triple(selectedPatient, best.first, best.second.score)
-    }
-
-    // private fun normalizeFingerLabel(value: String?): String {
-    //     return FingerLabelNormalizer.canonicalize(value)
-    // }
-
-    private fun matchesSelectedFinger(biometric: Biometric, selectedFinger: FingerType): Boolean {
-        // Direct comparison, fallback if null
-        return biometric.biometricType == selectedFinger.name || biometric.templateType == selectedFinger.name
-    }
-
-    private fun findBestMatch(probe: ByteArray, gallery: List<Biometric>): Pair<Biometric, MatchResult>? {
-        var best: Pair<Biometric, MatchResult>? = null
-        val verificationThreshold = 55.0
-        // Deduplicate: if same patient had multiple capture sessions of the same finger,
-        // keep only one template per unique hash to avoid inflated confidence (Issue 6 fix)
-        val uniqueGallery = gallery.distinctBy { it.hashed }
-        for (bio in uniqueGallery) {
-            val result = biometricManager.match(probe, bio.template)
-            if (result.score >= verificationThreshold && (best == null || result.score > best.second.score)) {
-                best = Pair(bio, result)
-            }
-        }
-        return best
     }
 
     fun reset() {

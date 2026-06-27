@@ -12,8 +12,10 @@ import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.data.repository.PatientRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 enum class RecallStep { IDLE, SCANNING, MATCHING, MATCHED, NO_MATCH, ERROR }
@@ -45,6 +47,8 @@ class RecallBiometricViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(RecallBiometricUiState())
     val uiState: StateFlow<RecallBiometricUiState> = _uiState.asStateFlow()
+
+    private val isScanInProgress = AtomicBoolean(false)
 
     init {
         loadBiometricStats()
@@ -94,16 +98,18 @@ class RecallBiometricViewModel @Inject constructor(
             }
             return
         }
-        viewModelScope.launch {
-            val allBiometrics = patientRepository.getAllBiometrics()
-            _uiState.update {
-                it.copy(
-                    totalBiometricTemplates = allBiometrics.size,
-                    totalClientsWithBiometrics = allBiometrics.map { bio -> bio.personUuid }.distinct().size
-                )
-            }
-            _uiState.update { it.copy(step = RecallStep.SCANNING) }
+        // Prevent concurrent scan operations if user taps the button rapidly
+        if (!isScanInProgress.compareAndSet(false, true)) return
+        viewModelScope.launch(Dispatchers.IO) {
             try {
+                val allBiometrics = patientRepository.getAllBiometrics()
+                _uiState.update {
+                    it.copy(
+                        totalBiometricTemplates = allBiometrics.size,
+                        totalClientsWithBiometrics = allBiometrics.map { bio -> bio.personUuid }.distinct().size
+                    )
+                }
+                _uiState.update { it.copy(step = RecallStep.SCANNING) }
                 val template = biometricManager.captureFingerprint(timeoutSeconds = 30)
                 if (template == null) {
                     _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = "Capture timed out. Place finger firmly on scanner and try again.") }
@@ -117,8 +123,11 @@ class RecallBiometricViewModel @Inject constructor(
                     it.copy(step = RecallStep.ERROR,
                         errorMessage = "Image quality too low (${e.quality}/100). Clean your finger and the scanner glass, then retry.")
                 }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = e.message ?: "Scanner error") }
+            } catch (e: Throwable) {
+                android.util.Log.e("RecallBiometricVM", "startScan fatal error", e)
+                _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = "${e.javaClass.simpleName}: ${e.message ?: "Unknown error"}") }
+            } finally {
+                isScanInProgress.set(false)
             }
         }
     }
@@ -126,20 +135,21 @@ class RecallBiometricViewModel @Inject constructor(
     private suspend fun matchFingerprint(template: ByteArray) {
         _uiState.update { it.copy(step = RecallStep.MATCHING) }
         try {
-            val matchResult = (syncRepository as? com.carecompanion.data.repository.SyncRepositoryImpl)?.identifyBiometric(
+            // Pass the vendor SDK as the scorer when the scanner is online.
+            // The repository uses the SDK for every candidate and falls back to the
+            // custom matcher automatically when sdkMatcher is null (offline mode).
+            val sdkMatcherFn: ((ByteArray, ByteArray) -> Double)? =
+                if (biometricManager.isReady()) { probe, ref -> biometricManager.match(probe, ref).score }
+                else null
+
+            val facilityId = com.carecompanion.utils.SharedPreferencesHelper.getFacilityId(context)
+                .takeIf { it > 0L }
+            val matchResult = syncRepository.identifyBiometric(
                 capturedTemplate = template,
-                facilityId = null // Optionally pass facilityId if available
+                facilityId = facilityId,
+                sdkMatcher = sdkMatcherFn
             )
             val isMatch = matchResult?.patient != null && matchResult.template != null
-            // Audit log every identification attempt for NPHCDA compliance
-            com.carecompanion.biometric.BiometricAuditLogger.logIdentification(
-                matchedPatientUuid = if (isMatch) matchResult?.patient?.uuid else null,
-                fingerType = matchResult?.template?.biometricType ?: "UNKNOWN",
-                matchScore = (matchResult?.confidence ?: 0.0) * 100.0,
-                candidatesSearched = _uiState.value.totalBiometricTemplates,
-                searchDurationMs = 0L,
-                method = "REPOSITORY"
-            )
             if (isMatch) {
                 _uiState.update {
                     it.copy(
@@ -151,26 +161,11 @@ class RecallBiometricViewModel @Inject constructor(
                 return
             }
             _uiState.update { it.copy(step = RecallStep.NO_MATCH, matchScore = (matchResult?.confidence ?: 0.0) * 100.0) }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = e.message) }
+            com.carecompanion.biometric.BiometricFileLogger.write("INFO", "RECALL_NO_MATCH_SHOWN", "step=NO_MATCH")
+        } catch (e: Throwable) {
+            android.util.Log.e("RecallBiometricVM", "matchFingerprint fatal error", e)
+            _uiState.update { it.copy(step = RecallStep.ERROR, errorMessage = "${e.javaClass.simpleName}: ${e.message}") }
         }
-    }
-
-    private suspend fun runSdkIdentificationFallback(probe: ByteArray): Triple<Patient, Biometric, Double>? {
-        val allBiometrics = patientRepository.getAllBiometrics()
-        var best: Pair<Biometric, MatchResult>? = null
-        // For identification (1:N), use a lower threshold than verification
-        // SL_HIGH security level is conservative, so we accept scores >= 50.0
-        val identificationThreshold = 50.0
-        for (bio in allBiometrics) {
-            val result = biometricManager.match(probe, bio.template)
-            if (result.score >= identificationThreshold && (best == null || result.score > best.second.score)) {
-                best = Pair(bio, result)
-            }
-        }
-        val bestMatch = best ?: return null
-        val patient = patientRepository.getPatientByUuid(bestMatch.first.personUuid) ?: return null
-        return Triple(patient, bestMatch.first, bestMatch.second.score)
     }
 
     fun reset() {

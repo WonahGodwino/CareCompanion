@@ -1,6 +1,7 @@
 package com.carecompanion.presentation.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
@@ -13,7 +14,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -28,6 +33,7 @@ import androidx.navigation.NavController
 import com.carecompanion.presentation.navigation.Screen
 import com.carecompanion.presentation.viewmodels.SharedViewModel
 import com.carecompanion.presentation.viewmodels.SyncViewModel
+import com.carecompanion.utils.SharedPreferencesHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +43,36 @@ fun HomeScreen(
     syncViewModel: SyncViewModel = hiltViewModel()
 ) {
     val syncState by syncViewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    var showLogoutDialog by remember { mutableStateOf(false) }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            icon = { Icon(Icons.Default.ExitToApp, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Sign Out", fontWeight = FontWeight.SemiBold) },
+            text = { Text("Signing out will end your session and return to the login screen. Patient data remains securely stored on this device.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        SharedPreferencesHelper.clearSession()
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Sign Out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -66,6 +102,9 @@ fun HomeScreen(
                     }
                     IconButton(onClick = { navController.navigate(Screen.Settings.route) }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                    IconButton(onClick = { showLogoutDialog = true }) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Sign Out")
                     }
                 }
             )
@@ -191,7 +230,32 @@ fun HomeScreen(
             }
 
             // ── AI Intelligence Banner ──────────────────────────────────
-            AiComingSoonBanner()
+            AiInsightsBanner(onClick = { navController.navigate(Screen.AiInsights.route) })
+
+            // ── Today at the Clinic ────────────────────────────────────
+            Text(
+                "Today at the Clinic",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MenuCard(
+                title = "Daily Worklist",
+                description = "Clients with appointments today — ART refills, VL due, TB screening, biometric recapture",
+                icon = Icons.Default.Today,
+                containerColor = Color(0xFFE3F2FD),
+                contentColor = Color(0xFF1565C0),
+                onClick = { navController.navigate(Screen.TodayWorklist.route) }
+            )
+            MenuCard(
+                title = "VL Cascade",
+                description = "PEPFAR 95-95-95 — TX_CURR · VL Tested · Suppressed",
+                icon = Icons.Default.BarChart,
+                containerColor = Color(0xFFF3E5F5),
+                contentColor = Color(0xFF6A1B9A),
+                onClick = { navController.navigate(Screen.VlCascade.route) }
+            )
 
             Text(
                 "Clinical Functions",
@@ -340,10 +404,10 @@ private fun KpiChip(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI Coming Soon Banner
+// AI Intelligence Banner — active entry point to on-device patient monitoring
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-private fun AiComingSoonBanner() {
+private fun AiInsightsBanner(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -353,6 +417,7 @@ private fun AiComingSoonBanner() {
                     colors = listOf(Color(0xFF1A237E), Color(0xFF4A148C), Color(0xFF880E4F))
                 )
             )
+            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier
@@ -395,7 +460,7 @@ private fun AiComingSoonBanner() {
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "Phase 1 — Q3 2026",
+                            text = "ACTIVE",
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF1A237E)
@@ -404,14 +469,14 @@ private fun AiComingSoonBanner() {
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Predictive IIT risk scoring · Smart defaulter tracing · Viral load forecasting · Clinical decision support",
+                    text = "Predicts IIT before clients miss · Smart defaulter tracing · VL/EAC, TB & distance signals · On-device, no data leaves the phone",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.White.copy(alpha = 0.85f),
                     lineHeight = 16.sp
                 )
             }
 
-            // Coming soon pill on right
+            // Open pill on right
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     imageVector = Icons.Default.Psychology,
@@ -421,12 +486,17 @@ private fun AiComingSoonBanner() {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Coming\nSoon",
-                    fontSize = 9.sp,
+                    text = "Open",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.70f),
+                    color = Color.White.copy(alpha = 0.85f),
                     textAlign = TextAlign.Center,
-                    lineHeight = 12.sp
+                )
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.70f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

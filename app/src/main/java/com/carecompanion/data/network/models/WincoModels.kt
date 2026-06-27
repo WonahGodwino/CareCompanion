@@ -306,3 +306,16 @@ data class WincoPharmacyHistoryResponse(
     @SerializedName("count") val count: Int = 0,
     @SerializedName("items") val items: List<WincoPharmacyVisit> = emptyList(),
 )
+
+// ---------------------------------------------------------------------------
+// Bulk biometric templates — POST /api/art/biometrics/bulk
+// Single request returns templates for up to 200 patients.
+// ---------------------------------------------------------------------------
+
+data class WincoBulkBiometricRequest(
+    @SerializedName("person_uuids") val personUuids: List<String>,
+)
+
+data class WincoBulkBiometricResponse(
+    @SerializedName("biometrics") val biometrics: Map<String, WincoBiometricResponse> = emptyMap(),
+)

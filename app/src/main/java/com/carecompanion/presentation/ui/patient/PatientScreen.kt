@@ -20,7 +20,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import androidx.compose.foundation.clickable
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Patient
 import com.carecompanion.presentation.navigation.Screen
@@ -28,6 +27,8 @@ import com.carecompanion.presentation.viewmodels.PatientProfileViewModel
 import com.carecompanion.presentation.viewmodels.ViralLoadCurrentUiState
 import com.carecompanion.presentation.viewmodels.ViralLoadHistoryUiItem
 import com.carecompanion.presentation.viewmodels.SharedViewModel
+import com.carecompanion.presentation.viewmodels.VisitEventType
+import com.carecompanion.presentation.viewmodels.VisitTimelineEntry
 import com.carecompanion.utils.DateUtils
 import java.util.concurrent.TimeUnit
 
@@ -42,12 +43,14 @@ fun PatientScreen(
     val uiState by viewModel.uiState.collectAsState()
     val captureState by viewModel.captureState.collectAsState()
 
-    LaunchedEffect(patientId) { viewModel.loadPatient(patientId) }
+    LaunchedEffect(patientId) { 
+        viewModel.loadPatient(patientId) 
+    }
 
     // Biometric capture dialog
     if (captureState) {
         AlertDialog(
-            onDismissRequest = { /* Optionally reset state here if needed */ },
+            onDismissRequest = { /* viewModel.resetBiometricCapture() */ },
             title = { Text("Capture Biometric") },
             text = { Text("Simulate biometric capture for demonstration. Press 'Capture' to proceed.") },
             confirmButton = {
@@ -62,7 +65,7 @@ fun PatientScreen(
                 }
             },
             dismissButton = {
-                Button(onClick = { /* Optionally reset state here if needed */ }) {
+                Button(onClick = { /* viewModel.resetBiometricCapture() */ }) {
                     Text("Cancel")
                 }
             }
@@ -72,14 +75,23 @@ fun PatientScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(uiState.patient?.let { it.fullName ?: "${it.firstName} ${it.surname}" } ?: "Patient Profile", fontWeight = FontWeight.Bold) },
+                title = { 
+                    Text(
+                        uiState.patient?.let { it.fullName ?: "${it.firstName} ${it.surname}" } ?: "Patient Profile", 
+                        fontWeight = FontWeight.Bold
+                    ) 
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor             = MaterialTheme.colorScheme.primary,
-                    titleContentColor          = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor     = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary,
                     navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
-                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { 
+                    IconButton(onClick = { navController.popBackStack() }) { 
+                        Icon(Icons.Default.ArrowBack, "Back") 
+                    } 
+                },
                 actions = {
                     IconButton(onClick = {
                         uiState.patient?.let(sharedViewModel::setSelectedPatient)
@@ -90,70 +102,91 @@ fun PatientScreen(
                 }
             )
         }
-    ) { padding ->
+    ) { paddingValues ->
         if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
+                CircularProgressIndicator() 
+            }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-
-                item { PatientDemographicsCard(uiState.patient) }
-
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Patient Demographics Card
                 item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Fingerprint, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Biometric Enrollment", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                                Spacer(Modifier.weight(1f))
-                                Button(onClick = { viewModel.startBiometricCapture() }) {
-                                    Icon(Icons.Default.Add, contentDescription = null)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Capture Biometric")
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                if (uiState.hasBiometric) "Client has biometric" else "Client has no biometric",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = if (uiState.hasBiometric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Biometric records: ${uiState.biometricCount}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            RecaptureStatusSection(uiState.recaptureBreakdown)
-                        }
+                    PatientDemographicsCard(uiState.patient)
+                }
+
+                // AHD Alert Banner
+                if (uiState.isAhd) {
+                    item { AhdAlertBanner() }
+                }
+
+                // Current Regimen Card
+                uiState.currentRegimenShortName?.let { regimenShortName ->
+                    item {
+                        CurrentRegimenCard(
+                            shortName = regimenShortName,
+                            fullName  = uiState.currentRegimenFullName,
+                            line      = uiState.currentRegimenLine
+                        )
                     }
                 }
 
+                // Biometric Enrollment Card
+                item {
+                    BiometricEnrollmentCard(
+                        hasBiometric    = uiState.hasBiometric,
+                        biometricCount  = uiState.biometricCount,
+                        recaptureBreakdown = uiState.recaptureBreakdown,
+                        recaptureOverdue   = uiState.recaptureOverdue,
+                        recaptureRecommended = uiState.recaptureRecommended,
+                        daysSinceLastBiometric = uiState.daysSinceLastBiometric,
+                        onCapture = { viewModel.startBiometricCapture() }
+                    )
+                }
+
+                // Viral Load Current Card
                 item {
                     ViralLoadCurrentCard(uiState.currentViralLoad)
                 }
 
+                // Viral Load History Card
                 item {
                     ViralLoadHistoryCard(uiState.viralLoadHistory)
                 }
 
+                // Service Eligibility Section
                 item {
                     ServiceEligibilitySection(uiState.artPharmacy, uiState.currentViralLoad)
                 }
 
+                // Visit Timeline
+                if (uiState.visitTimeline.isNotEmpty()) {
+                    item { VisitTimelineCard(uiState.visitTimeline) }
+                }
+
+                // ART Pharmacy History
                 if (uiState.artPharmacy.isNotEmpty()) {
                     item {
-                        Text("ART Pharmacy History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("ART Pharmacy Records", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
                     items(uiState.artPharmacy) { record ->
                         ArtPharmacyCard(record)
                     }
                 } else {
                     item {
-                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(), 
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp), 
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(Icons.Default.MedicalServices, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.width(8.dp))
                                 Text("No ART pharmacy records", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -162,6 +195,303 @@ fun PatientScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PatientDemographicsCard(patient: Patient?) {
+    if (patient == null) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header with avatar and name
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(64.dp).clip(CircleShape),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = (patient.firstName?.firstOrNull() ?: patient.fullName?.firstOrNull() ?: '?').toString().uppercase(),
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        patient.fullName ?: "${patient.firstName ?: ""} ${patient.surname ?: ""}".trim(),
+                        fontWeight = FontWeight.ExtraBold,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            patient.hospitalNumber,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
+
+            // Demographics grid
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                InfoRowWithIcon(
+                    if (patient.sex == "F") "Female" else if (patient.sex == "M") "Male" else "Unknown",
+                    Icons.Default.Person
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    InfoRowWithIcon(
+                        patient.dateOfBirth?.let { DateUtils.formatDate(it) } ?: "Unknown",
+                        Icons.Default.CalendarToday
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    InfoRowWithIcon(
+                        "${DateUtils.calculateAge(patient.dateOfBirth)} years${if (patient.isDateOfBirthEstimated) " (est.)" else ""}",
+                        Icons.Default.Cake
+                    )
+                }
+                patient.ninNumber?.let { InfoRowWithIcon(it, Icons.Default.Badge) }
+                patient.phoneNumber?.let { InfoRowWithIcon(it, Icons.Default.Phone) }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
+
+                // NDR Match Status — dedicated row with clear colour coding so clinicians
+                // can instantly see whether this patient exists in the national registry.
+                NdrMatchStatusRow(patient.ndrMatchedStatus)
+            }
+        }
+    }
+}
+
+// Normalises all known WINCO / NPHCDA NDR match_outcome values to a boolean.
+// WINCO currently sends "Matched" / "Not Matched" but some NDR configurations
+// emit "YES", "MATCH", "NDR_MATCHED" etc. — all are treated as matched here.
+private fun isNdrMatched(raw: String?): Boolean {
+    if (raw.isNullOrBlank()) return false
+    val v = raw.trim().uppercase().replace("_", "").replace("-", "").replace(" ", "")
+    return v == "MATCHED" || v == "MATCH" || v == "YES" || v == "Y" ||
+        v == "NDRMATCHED" || v == "TRUE" || v == "1"
+}
+
+@Composable
+private fun NdrMatchStatusRow(ndrMatchedStatus: String?) {
+    val isMatched = isNdrMatched(ndrMatchedStatus)
+    val containerColor = if (isMatched) Color(0xFFE8F5E9) else Color(0xFFFFF8E1)
+    val contentColor  = if (isMatched) Color(0xFF1B5E20) else Color(0xFF795548)
+    val icon          = if (isMatched) Icons.Default.VerifiedUser else Icons.Default.Warning
+    val label         = if (isMatched) "NDR Matched" else "Not Matched on NDR"
+    val sublabel      = if (isMatched)
+        "Patient record confirmed in National Data Repository"
+    else
+        "Patient not yet matched in National Data Repository"
+
+    Surface(
+        color = containerColor,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(22.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold, color = contentColor, style = MaterialTheme.typography.bodyMedium)
+                Text(sublabel, color = contentColor.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoRowWithIcon(value: String, icon: ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun BiometricEnrollmentCard(
+    hasBiometric: Boolean,
+    biometricCount: Int,
+    recaptureBreakdown: Map<Int, Int>,
+    recaptureOverdue: Boolean,
+    recaptureRecommended: Boolean,
+    daysSinceLastBiometric: Long?,
+    onCapture: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Fingerprint, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Biometric Enrollment", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Button(onClick = onCapture) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Capture")
+                }
+            }
+
+            // Recapture overdue — urgent compliance banner (≥ 24 months + not NDR matched)
+            if (recaptureOverdue) {
+                Surface(
+                    color = Color(0xFFFFEBEE),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, null, tint = Color(0xFFC62828), modifier = Modifier.size(20.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Biometric Recapture Overdue",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFC62828),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Last biometric captured ${daysSinceLastBiometric ?: "—"} days ago. " +
+                                    "Patient is not matched on NDR. Recapture required for PEPFAR compliance.",
+                                color = Color(0xFFB71C1C),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            } else if (recaptureRecommended) {
+                // Routine recommendation — 15-day programme cadence
+                Surface(
+                    color = Color(0xFFFFF8E1),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Default.Info, null, tint = Color(0xFFF57F17), modifier = Modifier.size(20.dp))
+                        Text(
+                            "Recapture recommended — ${daysSinceLastBiometric ?: "—"} days since last capture (target: ≤ 15 days).",
+                            color = Color(0xFFE65100),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
+            Text(
+                if (hasBiometric) "Client has biometric" else "Client has no biometric",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = if (hasBiometric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
+            Text(
+                "Biometric records: $biometricCount",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            RecaptureStatusSection(recaptureBreakdown)
+        }
+    }
+}
+
+@Composable
+private fun RecaptureStatusSection(recaptureBreakdown: Map<Int, Int>) {
+    val hasBasePrint = (recaptureBreakdown[0] ?: 0) > 0
+    val hasFirstRecapture = (recaptureBreakdown[1] ?: 0) > 0
+    val additionalRecaptures = recaptureBreakdown.filterKeys { it > 1 }.toSortedMap()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        RecaptureStatusChip(
+            modifier = Modifier.weight(1f),
+            label = "R0 Base Print",
+            count = recaptureBreakdown[0] ?: 0,
+            available = hasBasePrint
+        )
+        RecaptureStatusChip(
+            modifier = Modifier.weight(1f),
+            label = "R1 Recapture",
+            count = recaptureBreakdown[1] ?: 0,
+            available = hasFirstRecapture
+        )
+    }
+
+    if (additionalRecaptures.isNotEmpty()) {
+        Spacer(Modifier.height(6.dp))
+        Text("Other recaptures", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            additionalRecaptures.forEach { (recapture, count) ->
+                SuggestionChip(onClick = {}, enabled = false, label = { Text("R$recapture ($count)") })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecaptureStatusChip(modifier: Modifier = Modifier, label: String, count: Int, available: Boolean) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = if (available) Color(0xFFE7F6EC) else MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                color = if (available) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.SemiBold)
+            Text(if (available) "Available ($count)" else "Not available",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (available) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onErrorContainer)
         }
     }
 }
@@ -332,16 +662,7 @@ private fun ViralLoadHistoryCard(history: List<ViralLoadHistoryUiItem>) {
 @Composable
 private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
     val palette = viralLoadPalette(item.resultStatus, item.resultFlag)
-    val header = when {
-        item.isPending -> "Viral Load Sample Collection"
-        item.resultNumeric != null -> "Viral Load Date"
-        else -> "Viral Load Record"
-    }
-    val statusText = when {
-        item.isPending -> "Result Pending"
-        else -> item.resultStatus
-    }
-
+    
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = palette.container,
@@ -360,7 +681,7 @@ private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    header,
+                    if (item.isPending) "Viral Load Sample Collection" else "Viral Load Date",
                     fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.bodyMedium,
                     color = palette.onContainer
@@ -441,13 +762,13 @@ private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
             }
 
             // Status badge (if not pending)
-            if (!item.isPending && statusText.isNotBlank()) {
+            if (!item.isPending && item.resultStatus.isNotBlank()) {
                 Surface(
                     color = palette.onContainer.copy(alpha = 0.10f),
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        statusText,
+                        item.resultStatus,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.onContainer,
@@ -460,131 +781,132 @@ private fun ViralLoadHistoryRow(item: ViralLoadHistoryUiItem) {
 }
 
 @Composable
-private fun PatientDemographicsCard(patient: Patient?) {
-    if (patient == null) return
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // Header with avatar and name
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Surface(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = (patient.firstName?.firstOrNull() ?: patient.fullName?.firstOrNull() ?: '?').toString().uppercase(),
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        patient.fullName ?: "${patient.firstName ?: ""} ${patient.surname ?: ""}".trim(),
-                        fontWeight = FontWeight.ExtraBold,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(6.dp)) {
-                        Text(
-                            patient.hospitalNumber,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+private fun ArtPharmacyCard(record: ArtPharmacy) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text(DateUtils.formatDate(record.visitDate), fontWeight = FontWeight.SemiBold)
+                record.nextAppointment?.let { 
+                    Text("Next: ${DateUtils.formatDate(it)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) 
                 }
             }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f))
-
-            // Demographics grid
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                InfoRowWithIcon("Female".takeIf { patient.sex == "F" } ?: "Male".takeIf { patient.sex == "M" } ?: "Unknown", Icons.Default.Person)
-                InfoRowWithIcon(patient.dateOfBirth?.let { DateUtils.formatDate(it) } ?: "Unknown", Icons.Default.CalendarToday)
-                InfoRowWithIcon("${DateUtils.calculateAge(patient.dateOfBirth)} years${if (patient.isDateOfBirthEstimated) " (est.)" else ""}", Icons.Default.Cake)
-                patient.ninNumber?.let { InfoRowWithIcon(it, Icons.Default.Badge) }
-                patient.phoneNumber?.let { InfoRowWithIcon(it, Icons.Default.Phone) }
+            record.mmdType?.let { Text("MMD Type: $it", style = MaterialTheme.typography.bodySmall) }
+            record.dsdModel?.let { Text("DSD Model: $it", style = MaterialTheme.typography.bodySmall) }
+            record.refillPeriod?.let { Text("Refill: ${it}m supply", style = MaterialTheme.typography.bodySmall) }
+            record.adherence?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (it) Icons.Default.CheckCircle else Icons.Default.Cancel, null, modifier = Modifier.size(14.dp), tint = if (it) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Adherence: ${if (it) "Good" else "Poor"}", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun InfoRowWithIcon(value: String, icon: ImageVector) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            icon,
-            null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.70f)
-        )
-        Text(value, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+private fun ServiceEligibilitySection(
+    artRecords: List<ArtPharmacy>,
+    currentViralLoad: ViralLoadCurrentUiState
+) {
+    val latest = artRecords.maxByOrNull { it.visitDate.time }
+    val daysOverdue = latest?.nextAppointment?.let {
+        TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time).toInt().coerceAtLeast(0)
+    } ?: 0
+    val daysUntilNextAppt = latest?.nextAppointment?.let {
+        TimeUnit.MILLISECONDS.toDays(it.time - System.currentTimeMillis()).toInt()
+    }
+
+    val iitEligible = latest?.nextAppointment != null && daysOverdue >= 28
+    val missedApptEligible = latest?.nextAppointment != null && daysOverdue >= 1
+    val artRefillEligible = latest?.nextAppointment != null && (daysUntilNextAppt ?: Int.MAX_VALUE) <= 7
+
+    val vlPending = currentViralLoad.isPendingResult
+    val vlOverduePending = currentViralLoad.isOverduePendingResult
+    val vlEligible = currentViralLoad.eligibility?.isEligibleToday == true && !vlPending
+
+    val items = listOf(
+        ServiceEligibilityItem("IIT", iitEligible, if (iitEligible) "Eligible: missed refill >= 28 days" else "Not eligible"),
+        ServiceEligibilityItem("ART Refills", artRefillEligible, when {
+            latest?.nextAppointment == null -> "No next appointment"
+            artRefillEligible -> "Eligible: appointment is within 7 days"
+            else -> "Not eligible"
+        }),
+        ServiceEligibilityItem("Missed Appointments", missedApptEligible, if (missedApptEligible) "Eligible: appointment date has passed" else "Not eligible"),
+        ServiceEligibilityItem("Viral Load", vlEligible, when {
+            vlOverduePending -> "Over due pending result (>30 days since sample collection)"
+            vlPending -> "Pending Viral Load Result (sample collected, awaiting result)"
+            vlEligible -> "Eligible based on sample collection due date"
+            else -> "Not eligible by sample collection due date"
+        }),
+        ServiceEligibilityItem("TPT", false, "Not eligible"),
+        ServiceEligibilityItem("TB", false, "Not eligible"),
+        ServiceEligibilityItem("AHD", false, "Not eligible")
+    )
+    
+    val eligibleCount = items.count { it.eligible }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Service Eligibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "$eligibleCount of ${items.size} services currently eligible for this client.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                items.forEachIndexed { idx, item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(item.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = if (item.eligible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                if (item.eligible) "Eligible" else "Not Eligible",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (item.eligible) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                    if (idx < items.lastIndex) HorizontalDivider()
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        Text(value, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun RecaptureStatusSection(recaptureBreakdown: Map<Int, Int>) {
-    val hasBasePrint = (recaptureBreakdown[0] ?: 0) > 0
-    val hasFirstRecapture = (recaptureBreakdown[1] ?: 0) > 0
-    val additionalRecaptures = recaptureBreakdown.filterKeys { it > 1 }.toSortedMap()
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+private fun AhdAlertBanner() {
+    Surface(
+        color = Color(0xFFFBE9E7),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        RecaptureStatusChip(
-            modifier = Modifier.weight(1f),
-            label = "R0 Base Print",
-            count = recaptureBreakdown[0] ?: 0,
-            available = hasBasePrint
-        )
-        RecaptureStatusChip(
-            modifier = Modifier.weight(1f),
-            label = "R1 Recapture",
-            count = recaptureBreakdown[1] ?: 0,
-            available = hasFirstRecapture
-        )
-    }
-
-    if (additionalRecaptures.isNotEmpty()) {
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Other recaptures",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(6.dp))
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            additionalRecaptures.forEach { (recapture, count) ->
-                SuggestionChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text("R$recapture ($count)") }
+            Icon(Icons.Default.Warning, contentDescription = null,
+                tint = Color(0xFFD84315), modifier = Modifier.size(22.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Advanced HIV Disease (AHD)", fontWeight = FontWeight.Bold,
+                    color = Color(0xFFBF360C), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Latest VL < 200 copies/mL. WHO criteria for AHD in adults on ART. " +
+                    "Assess for opportunistic infections, CD4 count, and intensified management.",
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFFBF360C),
+                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight
                 )
             }
         }
@@ -592,33 +914,121 @@ private fun RecaptureStatusSection(recaptureBreakdown: Map<Int, Int>) {
 }
 
 @Composable
-private fun RecaptureStatusChip(
-    modifier: Modifier = Modifier,
-    label: String,
-    count: Int,
-    available: Boolean
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = if (available) Color(0xFFE7F6EC) else MaterialTheme.colorScheme.errorContainer,
-        tonalElevation = 0.dp
+private fun CurrentRegimenCard(shortName: String, fullName: String?, line: String?) {
+    val lineColor = when (line) {
+        "1st Line"    -> Color(0xFF1565C0)
+        "2nd Line"    -> Color(0xFFE65100)
+        "3rd Line"    -> Color(0xFFC62828)
+        "Paediatric"  -> Color(0xFF558B2F)
+        else          -> Color(0xFF37474F)
+    }
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.elevatedCardElevation(2.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (available) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onErrorContainer,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                if (available) "Available ($count)" else "Not available",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (available) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onErrorContainer
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.Medication, contentDescription = null,
+                tint = lineColor, modifier = Modifier.size(26.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Current Regimen", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(shortName, style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = lineColor)
+                fullName?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            line?.let {
+                Surface(
+                    color = lineColor.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(it, style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold, color = lineColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun VisitTimelineCard(events: List<VisitTimelineEntry>) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.elevatedCardElevation(2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Timeline, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Text("Visit Timeline", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("Last ${events.size} events", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HorizontalDivider()
+            events.forEachIndexed { idx, event ->
+                VisitTimelineRow(event = event, isLast = idx == events.lastIndex)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisitTimelineRow(event: VisitTimelineEntry, isLast: Boolean) {
+    val (color, icon) = when (event.type) {
+        VisitEventType.ART_REFILL    -> Color(0xFF1565C0) to Icons.Default.MedicalServices
+        VisitEventType.VL_SAMPLE     -> Color(0xFF6A1B9A) to Icons.Default.Biotech
+        VisitEventType.VL_RESULT     -> Color(0xFF2E7D32) to Icons.Default.Science
+        VisitEventType.APPOINTMENT   -> Color(0xFF00695C) to Icons.Default.Event
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 0.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Timeline rail
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(24.dp)) {
+            Spacer(Modifier.height(14.dp))
+            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
+            if (!isLast) Box(modifier = Modifier.width(2.dp).height(32.dp).background(color.copy(alpha = 0.20f)))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+                Text(event.type.label, style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold, color = color)
+                Spacer(Modifier.weight(1f))
+                Text(DateUtils.formatDate(event.date), style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(event.detail, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            event.regimenName?.let { rn ->
+                Text("Regimen: $rn", style = MaterialTheme.typography.labelSmall, color = color)
+            }
+        }
+    }
+}
+
+private data class ServiceEligibilityItem(
+    val name: String,
+    val eligible: Boolean,
+    val note: String
+)
 
 private data class ViralLoadPalette(
     val container: Color,
@@ -661,130 +1071,5 @@ private fun viralLoadPalette(resultLabel: String, statusLabel: String): ViralLoa
             flagContainer = Color(0xFFE9EEF5),
             onFlagContainer = Color(0xFF263238),
         )
-    }
-}
-
-@Composable
-private fun ArtPharmacyCard(record: ArtPharmacy) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text(DateUtils.formatDate(record.visitDate), fontWeight = FontWeight.SemiBold)
-                record.nextAppointment?.let { Text("Next: ${DateUtils.formatDate(it)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-            }
-            record.mmdType?.let { Text("MMD Type: $it", style = MaterialTheme.typography.bodySmall) }
-            record.dsdModel?.let { Text("DSD Model: $it", style = MaterialTheme.typography.bodySmall) }
-            record.refillPeriod?.let { Text("Refill: ${it}m supply", style = MaterialTheme.typography.bodySmall) }
-            record.adherence?.let {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (it) Icons.Default.CheckCircle else Icons.Default.Cancel, null, modifier = Modifier.size(14.dp), tint = if (it) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Adherence: ${if (it) "Good" else "Poor"}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
-}
-
-private data class ServiceEligibilityItem(
-    val name: String,
-    val eligible: Boolean,
-    val note: String
-)
-
-@Composable
-private fun ServiceEligibilitySection(
-    artRecords: List<ArtPharmacy>,
-    currentViralLoad: ViralLoadCurrentUiState
-) {
-    val latest = artRecords.maxByOrNull { it.visitDate.time }
-    val daysOverdue = latest?.nextAppointment?.let {
-        TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time).toInt().coerceAtLeast(0)
-    } ?: 0
-    val daysUntilNextAppt = latest?.nextAppointment?.let {
-        TimeUnit.MILLISECONDS.toDays(it.time - System.currentTimeMillis()).toInt()
-    }
-
-    val iitEligible = latest?.nextAppointment != null && daysOverdue >= 28
-    val missedApptEligible = latest?.nextAppointment != null && daysOverdue >= 1
-    val artRefillEligible = latest?.nextAppointment != null && (daysUntilNextAppt ?: Int.MAX_VALUE) <= 7
-
-    val vlPending = currentViralLoad.isPendingResult
-    val vlOverduePending = currentViralLoad.isOverduePendingResult
-    val vlEligible = currentViralLoad.eligibility?.isEligibleToday == true && !vlPending
-
-    val items = listOf(
-        ServiceEligibilityItem(
-            "IIT",
-            iitEligible,
-            if (iitEligible) "Eligible: missed refill >= 28 days" else "Not eligible"
-        ),
-        ServiceEligibilityItem(
-            "ART Refills",
-            artRefillEligible,
-            when {
-                latest?.nextAppointment == null -> "No next appointment"
-                artRefillEligible -> "Eligible: appointment is within 7 days"
-                else -> "Not eligible"
-            }
-        ),
-        ServiceEligibilityItem(
-            "Missed Appointments",
-            missedApptEligible,
-            if (missedApptEligible) "Eligible: appointment date has passed" else "Not eligible"
-        ),
-        ServiceEligibilityItem(
-            "Viral Load",
-            vlEligible,
-            when {
-                vlOverduePending -> "Over due pending result (>30 days since sample collection)"
-                vlPending -> "Pending Viral Load Result (sample collected, awaiting result)"
-                vlEligible -> "Eligible based on sample collection due date"
-                else -> "Not eligible by sample collection due date"
-            }
-        ),
-        ServiceEligibilityItem("TPT", false, "Not eligible"),
-        ServiceEligibilityItem("TB", false, "Not eligible"),
-        ServiceEligibilityItem("AHD", false, "Not eligible")
-    )
-    val eligibleCount = items.count { it.eligible }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Other services summary card
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Service Eligibility", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "$eligibleCount of ${items.size} services currently eligible for this client.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                items.forEachIndexed { idx, item ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                            Text(item.note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (item.eligible) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                if (item.eligible) "Eligible" else "Not Eligible",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (item.eligible) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
-                    }
-                    if (idx < items.lastIndex) HorizontalDivider()
-                }
-            }
-        }
     }
 }

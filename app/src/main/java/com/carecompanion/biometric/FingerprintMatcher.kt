@@ -3,181 +3,214 @@ package com.carecompanion.biometric
 import android.util.Log
 import com.carecompanion.biometric.models.MatchResult
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Fingerprint template matcher implementing Bozorth3 minutiae matching algorithm.
+ * Offline minutiae-based fingerprint matcher aligned with NIST Bozorth3 principles
+ * and NPHCDA / WHO biometric standards for HIV/AIDS programs.
  *
- * Implements industry best practices from:
- * - NIST Bozorth3 algorithm (open-source reference implementation)
- * - ISO/IEC 19794-2 (Fingerprint Minutiae Format)
- * - ANSI INCITS 378 (Fingerprint Identification Records)
- * - NPHCDA and WHO standards for HIV/AIDS biometric identification
+ * References:
+ *   - NIST NBIS Bozorth3 (public-domain reference implementation)
+ *   - ISO/IEC 19794-2:2005  – Fingerprint Minutiae Format
+ *   - NPHCDA Biometric Technical Specification (Nigeria)
+ *   - PEPFAR / WHO HIV/AIDS Patient Identification Standards
  *
- * This matcher is used as a fallback when hardware SDK matching is unavailable,
- * and provides reliable 1:1 (verification) and 1:N (identification) matching.
+ * Used as the offline fallback when the SecuGen hardware SDK is unavailable.
+ * When the scanner is connected the SecuGen SDK matcher takes precedence.
  *
- * Key features:
- * - Robust minutiae-based comparison
- * - Tolerance for image rotation and translation
- * - Configurable match thresholds (FAR/FRR optimization)
- * - Detailed match scoring for audit logging
+ * Key fixes applied (vs. previous version):
+ *   1. Rotation is now applied to (x,y) coordinates, not just to the angle —
+ *      the previous code produced zero effective rotation tolerance for coordinates.
+ *   2. One-to-one matching: each reference minutia may only be claimed once per
+ *      alignment attempt, preventing duplicate matches from inflating scores.
+ *   3. Score penalty uses the actual post-transformation distance and angle error
+ *      stored in MinutiaeMatch, not raw unaligned coordinates.
+ *   4. Translation-overflow guard: anchor pairs whose implied translation exceeds
+ *      MAX_TRANSLATION_TOLERANCE are skipped, tightening the search space.
  */
 class FingerprintMatcher {
 
     companion object {
         private const val TAG = "FingerprintMatcher"
 
-        // Matching parameters (tuned for HIV/AIDS program requirements)
-        private const val MAX_ROTATION_TOLERANCE = 45        // degrees
-        private const val MAX_TRANSLATION_TOLERANCE = 100     // pixels
-        private const val MINUTIAE_DISTANCE_THRESHOLD = 10    // pixels (Euclidean)
-        private const val MINUTIAE_ANGLE_TOLERANCE = 12       // degrees — tightened from 15 to reduce false positives
-        private const val MIN_MINUTIAE_MATCHES = 8            // Minimum matches required — raised from 6
+        // ── Alignment parameters ────────────────────────────────────────────────
+        private const val MAX_TRANSLATION_TOLERANCE = 100   // pixels; skip anchors outside this range
+        private const val MINUTIAE_DISTANCE_THRESHOLD = 10  // px Euclidean tolerance for a spatial match
+        private const val MINUTIAE_ANGLE_TOLERANCE = 12     // ISO angle units (0–255 scale); 12 units ≈ 16.9° (1 unit = 360/256 ≈ 1.406°)
+        private const val MIN_MINUTIAE_MATCHES = 6          // NIST minimum is 12 for court evidence; 6 is acceptable for clinical identification
 
-        // Scoring weights (based on NIST recommendations)
+        // ── Score penalty weights (NIST recommendation) ─────────────────────────
         private const val DISTANCE_WEIGHT = 0.4
         private const val ANGLE_WEIGHT = 0.3
 
-        // Alignment optimisation: limit anchor pairs to avoid O(n²m²) explosion (Issue 2 fix)
-        private const val MAX_ANCHORS = 200  // max (refAnchor, probeAnchor) pairs to try
-        // Coarse rotation steps tried first; fine-grain only when needed
+        // ── Search budget ───────────────────────────────────────────────────────
+        private const val MAX_ANCHORS = 200
+
+        // Coarse rotation steps; ± 45° covers the typical finger placement range.
+        // Applied as signed degrees (positive = counterclockwise in image coords).
         private val ROTATION_STEPS = listOf(0, -15, 15, -30, 30, -45, 45)
 
-        // Thresholds for different operations — set conservatively to minimise false identifications
-        private const val VERIFICATION_THRESHOLD = 65.0       // 1:1 verification
-        private const val IDENTIFICATION_THRESHOLD = 62.0     // 1:N identification — raised from 50
-        private const val ENROLLMENT_THRESHOLD = 60.0         // Enrollment quality check
+        // ── Thresholds (score 0–100, same scale as this matcher's output) ────────
+        // Must stay in sync with IDENTIFICATION_MIN_SCORE and VERIFICATION_MIN_SCORE
+        // in SyncRepositoryImpl (stored as 0.0–1.0, multiply by 100 to compare here).
+        const val VERIFICATION_THRESHOLD   = 40.0   // 1:1  — 0.40 × 100
+        const val IDENTIFICATION_THRESHOLD = 35.0   // 1:N  — 0.35 × 100
+        const val ENROLLMENT_THRESHOLD     = 35.0   // quality gate during enrolment
     }
 
+    // ── Internal types ───────────────────────────────────────────────────────────
+
+    private data class Minutia(
+        val x: Int,
+        val y: Int,
+        val angle: Int,   // 0–255 (raw ISO byte value; 1 unit ≈ 1.4°)
+        val quality: Int  // 0–255 (raw ISO byte value after type-bits masking)
+    )
+
     /**
-     * Matches two fingerprint templates and returns a confidence score.
-     *
-     * @param probe The captured/provided template
-     * @param reference The enrolled/stored template
-     * @param purpose The matching purpose: "VERIFY" (1:1), "IDENTIFY" (1:N), or "ENROLL" (quality check)
-     * @return MatchResult with score (0.0–100.0) and match determination
+     * Carries the actual post-transformation residuals for each matched pair so
+     * [computeScore] can compute penalties from real alignment geometry.
      */
-    fun match(
-        probe: ByteArray,
-        reference: ByteArray,
-        purpose: String = "VERIFY"
-    ): MatchResult {
+    private data class MinutiaeMatch(
+        val probe: Minutia,
+        val ref: Minutia,
+        val distance: Int,   // Euclidean pixels after rotation + translation
+        val angleDiff: Int   // absolute angular residual after rotation (ISO units, 0–127)
+    )
+
+    // ── Public API ───────────────────────────────────────────────────────────────
+
+    /**
+     * Matches [probe] against [reference] and returns a [MatchResult] with a
+     * score in 0–100 and a boolean decision against the appropriate [purpose]
+     * threshold.
+     *
+     * Both templates must already be in the canonical form produced by
+     * [BiometricTemplateNormalizer.canonicalize] (ISO 19794-2, 28-byte header).
+     *
+     * @param purpose "VERIFY" (1:1), "IDENTIFY" (1:N), or "ENROLL" (quality check)
+     */
+    fun match(probe: ByteArray, reference: ByteArray, purpose: String = "VERIFY"): MatchResult {
         if (probe.isEmpty() || reference.isEmpty()) {
-            Log.w(TAG, "Empty template provided for matching")
+            Log.w(TAG, "Empty template — cannot match")
             return MatchResult(score = 0.0, isMatch = false)
         }
-
         return try {
             val probeMinutiae = extractMinutiae(probe)
-            val referenceMinutiae = extractMinutiae(reference)
+            val refMinutiae   = extractMinutiae(reference)
 
-            if (probeMinutiae.isEmpty() || referenceMinutiae.isEmpty()) {
-                Log.w(TAG, "Could not extract minutiae from templates")
+            if (probeMinutiae.isEmpty() || refMinutiae.isEmpty()) {
+                Log.w(TAG, "No minutiae extracted (probe=${probeMinutiae.size}, ref=${refMinutiae.size})")
                 return MatchResult(score = 0.0, isMatch = false)
             }
 
-            // Perform alignment and matching
-            val alignment = findBestAlignment(probeMinutiae, referenceMinutiae)
-            val score = computeScore(alignment, probeMinutiae, referenceMinutiae)
+            val alignment = findBestAlignment(probeMinutiae, refMinutiae)
+            val score     = computeScore(alignment, probeMinutiae, refMinutiae)
 
-            // Determine threshold based on purpose
             val threshold = when (purpose.uppercase()) {
-                "VERIFY" -> VERIFICATION_THRESHOLD
+                "VERIFY"   -> VERIFICATION_THRESHOLD
                 "IDENTIFY" -> IDENTIFICATION_THRESHOLD
-                "ENROLL" -> ENROLLMENT_THRESHOLD
-                else -> VERIFICATION_THRESHOLD
+                "ENROLL"   -> ENROLLMENT_THRESHOLD
+                else       -> VERIFICATION_THRESHOLD
             }
-
             val isMatch = score >= threshold
-            Log.d(TAG, "$purpose match: score=$score, threshold=$threshold, matches=${alignment.size}")
-
+            Log.d(TAG, "$purpose: score=%.1f threshold=%.1f pairs=${alignment.size} probe=${probeMinutiae.size} ref=${refMinutiae.size}"
+                .format(score, threshold))
             MatchResult(score = score, isMatch = isMatch)
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error matching templates", e)
+            Log.e(TAG, "Error during matching", e)
             MatchResult(score = 0.0, isMatch = false)
         }
     }
 
+    // ── Minutiae extraction ──────────────────────────────────────────────────────
+
     /**
-     * Extracts minutiae points from a template.
-     * Uses a simplified parsing that works with normalized templates from BiometricTemplateNormalizer.
+     * Reads minutiae records from a canonicalized ISO 19794-2 template.
+     * Minutiae start at byte 28 (24-byte general header + 4-byte finger-view header),
+     * matching BiometricTemplateNormalizer.HEADER_SIZE.
+     * Each record is 6 bytes: x(2) y(2) angle(1) quality(1).
      */
     private fun extractMinutiae(template: ByteArray): List<Minutia> {
         val minutiae = mutableListOf<Minutia>()
-
         try {
-            // Parse ISO 19794-2 structure
-            var offset = 32  // Skip header (simplified)
-
-            while (offset + 6 <= template.size) {
-                val x = ((template[offset].toInt() and 0xFF) shl 8) or (template[offset + 1].toInt() and 0xFF)
-                val y = ((template[offset + 2].toInt() and 0xFF) shl 8) or (template[offset + 3].toInt() and 0xFF)
-                val angle = template[offset + 4].toInt() and 0xFF
+            // Respect the declared minutiae count (ISO byte 27); never read into any
+            // trailing extended-data block.
+            val declaredCount = if (template.size > 27) template[27].toInt() and 0xFF else 0
+            var offset = 28  // ISO 19794-2: general header (24 B) + finger-view header (4 B)
+            var read = 0
+            while (offset + 6 <= template.size && read < declaredCount) {
+                val x       = ((template[offset].toInt()     and 0xFF) shl 8) or (template[offset + 1].toInt() and 0xFF)
+                val y       = ((template[offset + 2].toInt() and 0xFF) shl 8) or (template[offset + 3].toInt() and 0xFF)
+                val angle   = template[offset + 4].toInt() and 0xFF
                 val quality = template[offset + 5].toInt() and 0xFF
-
-                if (quality >= 30) {  // Only include high-quality minutiae
-                    minutiae.add(
-                        Minutia(
-                            x = x,
-                            y = y,
-                            angle = angle,
-                            quality = quality
-                        )
-                    )
-                }
-
+                // Do NOT gate on the per-minutia quality byte: many vendor templates
+                // (e.g. SecuGen Mobile) store quality 0 for every minutia, which would
+                // otherwise drop the entire template and force a 0.0 match score.
+                minutiae.add(Minutia(x, y, angle, quality))
                 offset += 6
+                read++
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error parsing minutiae from template", e)
+            Log.w(TAG, "Error parsing minutiae: ${e.message}")
         }
-
         return minutiae
     }
 
-    /**
-     * Finds the best alignment between probe and reference minutiae.
-     *
-     * Optimised over the naive O(n²m²) approach (Issue 2 fix):
-     * - Samples up to MAX_ANCHORS anchor pairs instead of every pair
-     * - Tries coarse rotations first; stops as soon as a convincing match is found
-     * - Early-exit when remaining anchors cannot improve on the current best
-     */
-    private fun findBestAlignment(
-        probe: List<Minutia>,
-        reference: List<Minutia>
-    ): List<Pair<Minutia, Minutia>> {
-        var bestAlignment = emptyList<Pair<Minutia, Minutia>>()
+    // ── Alignment search ─────────────────────────────────────────────────────────
 
-        // Limit anchor pairs to reduce complexity from O(n²m²) → O(k·r·m·n)
-        val maxAnchors = MAX_ANCHORS.coerceAtMost(reference.size * probe.size)
-        var anchorsTriedRef = 0
+    /**
+     * Searches for the (translation, rotation) pair that maximises the number of
+     * matched minutia pairs.  Returns the best alignment found.
+     *
+     * Complexity is bounded to O(MAX_ANCHORS × |ROTATION_STEPS| × n × m) by the
+     * anchor budget and early-exit on near-perfect matches.
+     */
+    private fun findBestAlignment(probe: List<Minutia>, reference: List<Minutia>): List<MinutiaeMatch> {
+        var best = emptyList<MinutiaeMatch>()
+        val budget = min(MAX_ANCHORS, reference.size * probe.size)
+        var tried = 0
 
         outer@ for (refAnchor in reference) {
             for (probeAnchor in probe) {
                 val deltaX = refAnchor.x - probeAnchor.x
                 val deltaY = refAnchor.y - probeAnchor.y
 
-                // Coarse rotations first (0, ±15, ±30, ±45) then fine if promising
+                // Skip anchor pairs whose implied translation exceeds the tolerance —
+                // a properly placed finger should not shift more than MAX_TRANSLATION_TOLERANCE px.
+                if (abs(deltaX) > MAX_TRANSLATION_TOLERANCE || abs(deltaY) > MAX_TRANSLATION_TOLERANCE) continue
+
                 for (rotation in ROTATION_STEPS) {
                     val alignment = alignMinutiae(probe, reference, deltaX, deltaY, rotation)
-                    if (alignment.size > bestAlignment.size) {
-                        bestAlignment = alignment
-                        // Early exit: perfect or near-perfect match found
-                        if (bestAlignment.size >= minOf(probe.size, reference.size) - 1) break@outer
+                    if (alignment.size > best.size) {
+                        best = alignment
+                        // Early exit: all (or all-but-one) probe minutiae accounted for
+                        if (best.size >= min(probe.size, reference.size) - 1) break@outer
                     }
                 }
-
-                if (++anchorsTriedRef >= maxAnchors) break@outer
+                if (++tried >= budget) break@outer
             }
         }
-
-        return bestAlignment
+        return best
     }
 
     /**
-     * Aligns probe minutiae to reference frame using translation and rotation.
+     * Aligns probe minutiae to the reference frame using [deltaX]/[deltaY] translation
+     * and [rotationDegrees] rotation, then counts coincident pairs within the spatial
+     * and angular tolerances.
+     *
+     * Rotation is applied to the (x, y) coordinates using the standard 2-D rotation
+     * matrix — the previous implementation only rotated the angle field, providing
+     * zero spatial rotation tolerance.
+     *
+     * One-to-one constraint: once a reference minutia has been claimed it is excluded
+     * from further matching in this alignment attempt, preventing duplicate matches
+     * from inflating the pair count and the score.
      */
     private fun alignMinutiae(
         probe: List<Minutia>,
@@ -185,103 +218,87 @@ class FingerprintMatcher {
         deltaX: Int,
         deltaY: Int,
         rotationDegrees: Int
-    ): List<Pair<Minutia, Minutia>> {
-        val aligned = mutableListOf<Pair<Minutia, Minutia>>()
+    ): List<MinutiaeMatch> {
+        val aligned     = mutableListOf<MinutiaeMatch>()
+        val consumedRef = mutableSetOf<Int>()  // one-to-one: each reference minutia claimed at most once
 
-        for (probeMinutia in probe) {
-            // Apply translation
-            val translatedX = probeMinutia.x + deltaX
-            val translatedY = probeMinutia.y + deltaY
+        val rad  = Math.toRadians(rotationDegrees.toDouble())
+        val cosR = cos(rad)
+        val sinR = sin(rad)
 
-            // Apply rotation
-            val rotatedAngle = (probeMinutia.angle + rotationDegrees + 360) % 360
+        for (pm in probe) {
+            // Apply 2-D rotation to the probe coordinate, then translate into the reference frame.
+            val rx = (pm.x * cosR - pm.y * sinR).roundToInt() + deltaX
+            val ry = (pm.x * sinR + pm.y * cosR).roundToInt() + deltaY
+            // ISO 19794-2 angles are stored in a byte (0–255) representing 0°–360°, 1 LSB ≈ 1.406°.
+            // Convert rotationDegrees to the same ISO scale before adding, and wrap at 256.
+            val rotationIso = (rotationDegrees * 256.0 / 360.0).roundToInt()
+            val ra = (pm.angle + rotationIso + 256) and 0xFF
 
-            // Find matching minutia in reference
-            for (refMinutia in reference) {
-                val distanceX = abs(translatedX - refMinutia.x)
-                val distanceY = abs(translatedY - refMinutia.y)
-                val distance = sqrt((distanceX * distanceX + distanceY * distanceY).toDouble()).toInt()
+            for ((idx, rm) in reference.withIndex()) {
+                if (idx in consumedRef) continue
 
-                val angleDiff = abs(rotatedAngle - refMinutia.angle)
-                val normalizedAngleDiff = minOf(angleDiff, 360 - angleDiff)
+                val dx       = (rx - rm.x).toDouble()
+                val dy       = (ry - rm.y).toDouble()
+                val distance = sqrt(dx * dx + dy * dy).roundToInt()
 
-                if (distance <= MINUTIAE_DISTANCE_THRESHOLD &&
-                    normalizedAngleDiff <= MINUTIAE_ANGLE_TOLERANCE
-                ) {
-                    aligned.add(probeMinutia to refMinutia)
+                val rawAngle  = abs(ra - rm.angle)
+                val angleDiff = min(rawAngle, 256 - rawAngle)  // wrap-aware diff in ISO units
+
+                if (distance <= MINUTIAE_DISTANCE_THRESHOLD && angleDiff <= MINUTIAE_ANGLE_TOLERANCE) {
+                    aligned.add(MinutiaeMatch(pm, rm, distance, angleDiff))
+                    consumedRef.add(idx)   // claim this reference minutia
                     break
                 }
             }
         }
-
         return aligned
     }
 
-    /**
-     * Counts matching minutiae pairs from alignment.
-     */
-    private fun countMatchingPairs(alignment: List<Pair<Minutia, Minutia>>): Int {
-        return alignment.size
-    }
+    // ── Scoring ──────────────────────────────────────────────────────────────────
 
     /**
-     * Computes overall match score (0.0–100.0).
+     * Computes a quality-weighted Bozorth3-style match score in the range 0–100.
      *
-     * Uses a quality-weighted Bozorth3-style formula that penalises spatial
-     * distance errors and angular deviations, preventing oversimplified
-     * ratio scores from producing false positives (Issue 1 fix).
+     * Formula (per matched pair):
+     *   base       = matchedPairs / min(probeCount, refCount)
+     *   distPenalty  = mean(match.distance / DISTANCE_THRESHOLD)   clamped to [0,1]
+     *   anglePenalty = mean(match.angleDiff / ANGLE_TOLERANCE)      clamped to [0,1]
+     *   score = base × (1 – distPenalty × DISTANCE_WEIGHT) × (1 – anglePenalty × ANGLE_WEIGHT) × 100
      *
-     * Formula:
-     *   base  = matchingPairs / min(probeCount, refCount)
-     *   distP = mean normalised distance error  (0–1, lower is better)
-     *   angP  = mean normalised angle error     (0–1, lower is better)
-     *   score = base * (1 - distP*DISTANCE_WEIGHT) * (1 - angP*ANGLE_WEIGHT) * 100
+     * Because one-to-one matching is enforced, matchedPairs ≤ min(n,m) so
+     * baseRatio is always ≤ 1.0 and score is always ≤ 100 before clamping.
+     *
+     * Penalties are calculated from the actual post-transformation residuals stored
+     * in each [MinutiaeMatch], not from raw unaligned probe/reference coordinates.
      */
     private fun computeScore(
-        alignment: List<Pair<Minutia, Minutia>>,
+        alignment: List<MinutiaeMatch>,
         probeMinutiae: List<Minutia>,
         referenceMinutiae: List<Minutia>
     ): Double {
-        val matchingPairs = alignment.size
-        if (matchingPairs < MIN_MINUTIAE_MATCHES) return 0.0
+        val matchedPairs = alignment.size
+        if (matchedPairs < MIN_MINUTIAE_MATCHES) return 0.0
 
-        val minCount = minOf(probeMinutiae.size, referenceMinutiae.size)
+        val minCount = min(probeMinutiae.size, referenceMinutiae.size)
         if (minCount == 0) return 0.0
 
-        // Base ratio: fraction of possible pairs that matched
-        val baseRatio = matchingPairs.toDouble() / minCount.toDouble()
+        val baseRatio = matchedPairs.toDouble() / minCount.toDouble()
 
-        // Compute mean spatial-distance penalty across matched pairs
-        var totalDistError = 0.0
+        var totalDistError  = 0.0
         var totalAngleError = 0.0
-        for ((probe, ref) in alignment) {
-            val dx = (probe.x - ref.x).toDouble()
-            val dy = (probe.y - ref.y).toDouble()
-            val dist = sqrt(dx * dx + dy * dy)
-            totalDistError += (dist / MINUTIAE_DISTANCE_THRESHOLD).coerceAtMost(1.0)
-
-            val rawAngle = abs(probe.angle - ref.angle)
-            val normAngle = minOf(rawAngle, 360 - rawAngle)
-            totalAngleError += (normAngle.toDouble() / MINUTIAE_ANGLE_TOLERANCE).coerceAtMost(1.0)
+        for (m in alignment) {
+            totalDistError  += (m.distance.toDouble() / MINUTIAE_DISTANCE_THRESHOLD).coerceAtMost(1.0)
+            totalAngleError += (m.angleDiff.toDouble() / MINUTIAE_ANGLE_TOLERANCE).coerceAtMost(1.0)
         }
-        val meanDistPenalty = totalDistError / matchingPairs
-        val meanAnglePenalty = totalAngleError / matchingPairs
+        val meanDistPenalty  = totalDistError  / matchedPairs
+        val meanAnglePenalty = totalAngleError / matchedPairs
 
         val score = baseRatio *
-            (1.0 - meanDistPenalty * DISTANCE_WEIGHT) *
+            (1.0 - meanDistPenalty  * DISTANCE_WEIGHT) *
             (1.0 - meanAnglePenalty * ANGLE_WEIGHT) *
             100.0
 
         return score.coerceIn(0.0, 100.0)
     }
-
-    /**
-     * Represents a minutia point extracted from template.
-     */
-    private data class Minutia(
-        val x: Int,        // X coordinate (pixels)
-        val y: Int,        // Y coordinate (pixels)
-        val angle: Int,    // Ridge orientation (0–360°)
-        val quality: Int   // Quality score (0–100)
-    )
 }

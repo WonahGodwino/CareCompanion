@@ -3,7 +3,6 @@ package com.carecompanion.presentation.viewmodels
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.carecompanion.biometric.models.FingerLabelNormalizer
 import com.carecompanion.data.database.entities.ArtPharmacy
 import com.carecompanion.data.database.entities.Biometric
 import com.carecompanion.data.database.entities.Patient
@@ -11,6 +10,7 @@ import com.carecompanion.data.database.entities.ViralLoadHistory
 import com.carecompanion.data.repository.PatientRepository
 import com.carecompanion.biometric.models.FingerType
 import com.carecompanion.utils.DateUtils
+import com.carecompanion.utils.RegimenLookup
 import com.carecompanion.utils.ViralLoadDueType
 import com.carecompanion.utils.ViralLoadEligibilityEngine
 import com.carecompanion.utils.ViralLoadEligibilityResult
@@ -53,6 +53,20 @@ data class ViralLoadCurrentUiState(
     val isOverduePendingResult: Boolean = false,
 )
 
+enum class VisitEventType(val label: String) {
+    ART_REFILL("ART Refill"),
+    VL_SAMPLE("VL Sample"),
+    VL_RESULT("VL Result"),
+    APPOINTMENT("Appointment")
+}
+
+data class VisitTimelineEntry(
+    val date: Date,
+    val type: VisitEventType,
+    val detail: String,
+    val regimenName: String? = null
+)
+
 data class PatientProfileUiState(
     val patient: Patient? = null,
     val biometrics: List<Biometric> = emptyList(),
@@ -64,7 +78,23 @@ data class PatientProfileUiState(
     val biometricCount: Int = 0,
     val recaptureBreakdown: Map<Int, Int> = emptyMap(),
     val isLoading: Boolean = true,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+
+    // ── Advanced HIV Disease flag (VL < 200 copies/mL) ────────────────────────
+    val isAhd: Boolean = false,
+
+    // ── Current regimen from RegimenLookup ────────────────────────────────────
+    val currentRegimenShortName: String? = null,
+    val currentRegimenFullName: String? = null,
+    val currentRegimenLine: String? = null,
+
+    // ── Patient visit timeline (last 12 events, descending) ───────────────────
+    val visitTimeline: List<VisitTimelineEntry> = emptyList(),
+
+    // ── Biometric recapture staleness (PEPFAR / NPHCDA) ───────────────────────
+    val recaptureRecommended: Boolean = false,
+    val recaptureOverdue: Boolean = false,
+    val daysSinceLastBiometric: Long? = null
 )
 
 
@@ -72,7 +102,8 @@ data class PatientProfileUiState(
 @HiltViewModel
 class PatientProfileViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val patientRepository: PatientRepository
+    private val patientRepository: PatientRepository,
+    private val syncRepository: com.carecompanion.data.repository.SyncRepository
 ) : ViewModel() {
 
     // UI state for the patient profile
@@ -96,16 +127,97 @@ class PatientProfileViewModel @Inject constructor(
                 val currentViralLoad = buildCurrentViralLoad(patient, vlHistory)
                 val enrolledFingers = biometrics.mapNotNull { it.biometricType?.let { type -> FingerType.fromDisplayName(type) } }.toSet()
                 val recaptureBreakdown = biometrics.groupingBy { it.recapture }.eachCount().toSortedMap()
+
+                // ── Recapture staleness calculation ────────────────────────────────────
+                // Use the most recent date available across all non-archived biometrics.
+                val latestBioDate: Date? = biometrics
+                    .mapNotNull { it.lastModifiedDate ?: it.enrollmentDate ?: it.lastSyncDate }
+                    .maxOrNull()
+                val daysSinceLastBio = latestBioDate?.let {
+                    TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it.time)
+                }
+                // Recommend recapture after 15 days (programme cadence standard).
+                val recaptureRecommended = biometrics.isNotEmpty() && (daysSinceLastBio ?: 0L) >= 15
+                val ndrRaw = patient.ndrMatchedStatus?.trim()?.uppercase()
+                    ?.replace("_","")?.replace("-","")?.replace(" ","")
+                val notNdrMatched = ndrRaw == null ||
+                    (ndrRaw != "MATCHED" && ndrRaw != "MATCH" && ndrRaw != "YES" &&
+                     ndrRaw != "Y" && ndrRaw != "NDRMATCHED" && ndrRaw != "TRUE" && ndrRaw != "1")
+                val recaptureOverdue = biometrics.isNotEmpty() &&
+                    (daysSinceLastBio ?: 0L) >= 730 &&
+                    notNdrMatched
+
+                // ── AHD flag: VL < 200 copies/mL (WHO threshold) ──────────────────────
+                val latestVlResult = currentViralLoad.eligibility?.let { null }
+                    ?: (vlHistory.firstOrNull { !it.isPending }?.resultNumeric
+                        ?: patient.lastViralLoadResult?.toDouble())
+                val isAhd = latestVlResult != null && latestVlResult < 200.0 && latestVlResult > 0.0
+
+                // ── Current regimen from latest pharmacy record ────────────────────────
+                val latestRx = artPharmacy.maxByOrNull { it.visitDate }
+                val regimen = latestRx?.regimenId?.let { RegimenLookup.get(it) }
+
+                // ── Visit timeline: merge pharmacy visits + VL events (last 12) ─────
+                val sortedRx = artPharmacy.sortedByDescending { it.visitDate }
+                val timeline = buildList<VisitTimelineEntry> {
+                    sortedRx.forEach { rx ->
+                        val rxRegimen = rx.regimenId?.let { RegimenLookup.get(it) }
+                        add(VisitTimelineEntry(
+                            date       = rx.visitDate,
+                            type       = VisitEventType.ART_REFILL,
+                            detail     = buildString {
+                                append("Refill: ${rx.refillPeriod ?: "—"} days")
+                                rx.dsdModel?.let { append(" · $it") }
+                            },
+                            regimenName = rxRegimen?.shortName
+                        ))
+                        rx.nextAppointment?.let { apptDate ->
+                            add(VisitTimelineEntry(
+                                date   = apptDate,
+                                type   = VisitEventType.APPOINTMENT,
+                                detail = "Next appointment"
+                            ))
+                        }
+                    }
+                    vlHistory.forEach { vl ->
+                        vl.dateSampleCollected?.let { d ->
+                            add(VisitTimelineEntry(
+                                date   = d,
+                                type   = VisitEventType.VL_SAMPLE,
+                                detail = if (vl.isPending) "Sample collected — result pending"
+                                         else "Sample collected"
+                            ))
+                        }
+                        if (!vl.isPending) {
+                            vl.dateResultReported?.let { d ->
+                                add(VisitTimelineEntry(
+                                    date   = d,
+                                    type   = VisitEventType.VL_RESULT,
+                                    detail = "${vl.resultValueLabel} copies/mL — ${vl.resultStatus}"
+                                ))
+                            }
+                        }
+                    }
+                }.sortedByDescending { it.date }.take(15)
+
                 _uiState.value = _uiState.value.copy(
                     patient = patient,
                     biometrics = biometrics,
-                    artPharmacy = artPharmacy.sortedByDescending { it.visitDate },
+                    artPharmacy = sortedRx,
                     viralLoadHistory = vlHistory,
                     currentViralLoad = currentViralLoad,
                     enrolledFingers = enrolledFingers,
                     hasBiometric = biometrics.isNotEmpty(),
                     biometricCount = biometrics.size,
                     recaptureBreakdown = recaptureBreakdown,
+                    recaptureRecommended = recaptureRecommended,
+                    recaptureOverdue = recaptureOverdue,
+                    daysSinceLastBiometric = daysSinceLastBio,
+                    isAhd = isAhd,
+                    currentRegimenShortName = regimen?.shortName,
+                    currentRegimenFullName  = regimen?.fullName,
+                    currentRegimenLine      = regimen?.line,
+                    visitTimeline = timeline,
                     isLoading = false,
                     errorMessage = null
                 )
@@ -126,98 +238,35 @@ class PatientProfileViewModel @Inject constructor(
     fun onBiometricCaptured(fingerType: FingerType, template: ByteArray, templateType: String?) {
         viewModelScope.launch {
             val patient = _uiState.value.patient ?: return@launch
-            val biometrics = patientRepository.getBiometricsForPatient(patient.uuid)
-            val recaptures = biometrics.filter { it.templateType == templateType && it.biometricType == fingerType.displayName }
-            val nextRecapture = if (recaptures.isEmpty()) 0 else (recaptures.maxOf { it.recapture } + 1)
-
-            // Enforce minimum image quality
-            val minQuality = try {
-                val clazz = Class.forName("com.carecompanion.biometric.secugen.SecuGenQuality")
-                clazz.getField("MIN_ENROLL").getInt(null)
-            } catch (e: Exception) {
-                60 // fallback
-            }
             val imageQuality = try {
-                // If BiometricManager is available, get last quality
                 com.carecompanion.biometric.BiometricManager::class.java.getDeclaredField("lastCaptureQuality").let { field ->
                     field.isAccessible = true
                     field.getInt(null)
                 }
             } catch (e: Exception) {
-                minQuality // fallback
+                60 // fallback
             }
-            if (imageQuality < minQuality) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Biometric image quality too low ($imageQuality < $minQuality). Please recapture."
-                )
-                _captureState.value = false
-                return@launch
-            }
-
-            // Prevent duplicate enrollment for same finger and template type
-            val duplicate = biometrics.any {
-                it.biometricType == fingerType.displayName && it.templateType == templateType && it.template.contentEquals(template)
-            }
-            if (duplicate) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Duplicate biometric detected for this finger and template type."
-                )
-                _captureState.value = false
-                return@launch
-            }
-
-            // Audit log (could be replaced with a real logger)
-            android.util.Log.i("BiometricCapture", "Enrolling biometric for patient=${patient.uuid}, finger=${fingerType.displayName}, quality=$imageQuality, recapture=$nextRecapture")
-
-            try {
-                val newBiometric = Biometric(
-                    id = java.util.UUID.randomUUID().toString(),
-                    personUuid = patient.uuid,
-                    template = template,
-                    biometricType = fingerType.displayName,
-                    templateType = templateType,
-                    recapture = nextRecapture,
-                    enrollmentDate = java.util.Date(),
-                    deviceName = null,
-                    imageQuality = imageQuality,
-                    iso = false,
-                    versionIso20 = false,
-                    lastSyncDate = java.util.Date(),
-                    archived = 0,
-                    count = null,
-                    createdBy = null,
-                    createdDate = java.util.Date(),
-                    extra = null,
-                    facilityId = null,
-                    hashed = null,
-                    lastModifiedBy = null,
-                    lastModifiedDate = null,
-                    matchBiometricId = null,
-                    matchPersonUuid = null,
-                    matchType = null,
-                    rawPayload = null,
-                    reason = null,
-                    recaptureMessage = null,
-                    replaceDate = null,
-                    sourceId = null
-                )
-                patientRepository.saveBiometric(newBiometric)
+            val enrollSuccess = syncRepository.enrollBiometric(
+                patientUuid = patient.uuid,
+                fingerType = fingerType.displayName,
+                template = template,
+                quality = imageQuality,
+                userId = null, // Optionally pass userId if available
+                facilityId = null // Optionally pass facilityId if available
+            )
+            if (enrollSuccess) {
                 loadPatient(patient.uuid) // Refresh UI
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     errorMessage = null
                 )
-            } catch (e: Exception) {
-                android.util.Log.e("BiometricCapture", "Failed to save biometric: ${e.message}", e)
+            } else {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to save biometric: ${e.message}"
+                    errorMessage = "Biometric enrollment failed. Please ensure quality and try again."
                 )
-            } finally {
-                _captureState.value = false
             }
+            _captureState.value = false
         }
     }
 

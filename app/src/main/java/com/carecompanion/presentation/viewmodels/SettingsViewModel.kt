@@ -69,14 +69,14 @@ class SettingsViewModel @Inject constructor(
 
     init { loadSettings() }
         fun onMatchThresholdChanged(value: Float) {
-            SharedPreferencesHelper.setMatchThreshold(context, value)
+            SharedPreferencesHelper.setMatchThreshold(context, value.toDouble())
             _uiState.update { it.copy(matchThreshold = value) }
         }
     fun triggerBiometricHashBackfill() {
         viewModelScope.launch {
             _backfillStatus.value = "Running biometric hash backfill..."
             try {
-                com.carecompanion.data.repository.SyncRepositoryImpl.checkAndBackfillBiometricHashes(biometricDao)
+                com.carecompanion.data.repository.SyncRepositoryImpl.Companion.checkAndBackfillBiometricHashes(biometricDao)
                 _backfillStatus.value = "Biometric hash backfill complete. See logs for details."
             } catch (e: Exception) {
                 _backfillStatus.value = "Backfill failed: ${e.message}"
@@ -105,7 +105,7 @@ class SettingsViewModel @Inject constructor(
                     viralLoadEnabled     = SharedPreferencesHelper.isViralLoadReminderEnabled(context),
                     tptEnabled           = SharedPreferencesHelper.isTptReminderEnabled(context),
                     ahdEnabled           = SharedPreferencesHelper.isAhdAlertEnabled(context),
-                    matchThreshold = SharedPreferencesHelper.getMatchThreshold(context)
+                    matchThreshold = SharedPreferencesHelper.getMatchThreshold(context).toFloat()
                 )
             }
         }

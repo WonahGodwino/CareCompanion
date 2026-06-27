@@ -1,5 +1,7 @@
-﻿package com.carecompanion.di
+package com.carecompanion.di
 
+import com.carecompanion.data.repository.AuthRepository
+import com.carecompanion.data.repository.AuthRepositoryImpl
 import com.carecompanion.data.repository.PatientRepository
 import com.carecompanion.data.repository.PatientRepositoryImpl
 import com.carecompanion.data.repository.SyncRepository
@@ -15,4 +17,5 @@ import javax.inject.Singleton
 abstract class RepositoryModule {
     @Binds @Singleton abstract fun bindPatientRepository(impl: PatientRepositoryImpl): PatientRepository
     @Binds @Singleton abstract fun bindSyncRepository(impl: SyncRepositoryImpl): SyncRepository
+    @Binds @Singleton abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
 }

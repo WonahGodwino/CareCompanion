@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.carecompanion.data.database.dao.*
 import com.carecompanion.data.database.entities.*
 
-@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class],version=15,exportSchema=false)
+@Database(entities=[Patient::class,Biometric::class,ArtPharmacy::class,SyncLog::class,Facility::class,ViralLoadHistory::class,AppUser::class,ReminderLog::class],version=17,exportSchema=false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun patientDao(): PatientDao
@@ -19,6 +19,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun syncLogDao(): SyncLogDao
     abstract fun facilityDao(): FacilityDao
     abstract fun viralLoadHistoryDao(): ViralLoadHistoryDao
+    abstract fun appUserDao(): AppUserDao
+    abstract fun reminderLogDao(): ReminderLogDao
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
@@ -158,10 +160,55 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Local user authentication table — no internet required to sign in.
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `app_user` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `username` TEXT NOT NULL,
+                        `fullName` TEXT NOT NULL,
+                        `role` TEXT NOT NULL,
+                        `hashedPin` TEXT NOT NULL,
+                        `salt` TEXT NOT NULL,
+                        `facilityId` INTEGER NOT NULL DEFAULT 0,
+                        `isActive` INTEGER NOT NULL DEFAULT 1,
+                        `createdAt` INTEGER NOT NULL,
+                        `lastLoginAt` INTEGER,
+                        `syncedFromWinco` INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_app_user_username` ON `app_user` (`username`)")
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Audit log of reminders the AI actually sent (closes the measurement loop).
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `reminder_log` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `personUuid` TEXT NOT NULL,
+                        `hospitalNumber` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        `reminderType` TEXT NOT NULL,
+                        `channels` TEXT NOT NULL,
+                        `success` INTEGER NOT NULL,
+                        `detail` TEXT,
+                        `riskScore` INTEGER NOT NULL,
+                        `riskBand` TEXT NOT NULL,
+                        `appointmentDate` INTEGER,
+                        `sentAt` INTEGER NOT NULL,
+                        `auto` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(context.applicationContext,AppDatabase::class.java,"care_companion_db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
                     .fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }

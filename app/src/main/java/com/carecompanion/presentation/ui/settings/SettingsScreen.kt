@@ -151,6 +151,89 @@ fun SettingsScreen(
                 )
             }
 
+            // ── Biometric Log Files ──────────────────────────────────
+            var showBiometricLogDialog by remember { mutableStateOf(false) }
+            val biometricLogPath = remember { com.carecompanion.biometric.BiometricFileLogger.logDirectoryPath() }
+            val biometricLogFiles = remember { com.carecompanion.biometric.BiometricFileLogger.listLogFiles() }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Biometric Diagnostic Logs", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Logs record every scan result, format detection, and matching decision. " +
+                        "Use these to analyse identification accuracy.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Location: $biometricLogPath",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (biometricLogFiles.isEmpty()) {
+                        Text("No log files yet — logs appear after the first scan.", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("${biometricLogFiles.size} file(s): ${biometricLogFiles.map { it.name }.joinToString(", ")}",
+                            style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { showBiometricLogDialog = true }) {
+                                Icon(Icons.Default.Article, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("View Latest")
+                            }
+                            OutlinedButton(onClick = {
+                                val latestFile = biometricLogFiles.firstOrNull() ?: return@OutlinedButton
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context, context.packageName + ".provider", latestFile
+                                )
+                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(android.content.Intent.createChooser(intent, "Share Biometric Log"))
+                            }) {
+                                Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Share")
+                            }
+                        }
+                    }
+                }
+            }
+            if (showBiometricLogDialog) {
+                var logContent by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(Unit) {
+                    logContent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.carecompanion.biometric.BiometricFileLogger.readLastLines(100)
+                    }
+                }
+                AlertDialog(
+                    onDismissRequest = { showBiometricLogDialog = false },
+                    title = { Text("Biometric Log (last 100 lines)") },
+                    text = {
+                        if (logContent == null) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(80.dp),
+                                contentAlignment = Alignment.Center
+                            ) { CircularProgressIndicator() }
+                        } else {
+                            val scroll = androidx.compose.foundation.rememberScrollState()
+                            Box(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(scroll)) {
+                                Text(
+                                    text = logContent ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showBiometricLogDialog = false }) { Text("Close") } }
+                )
+            }
+
             // ── WINCO Server ────────────────────────────────────────
             Text("WINCO Server", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(
@@ -235,6 +318,17 @@ fun SettingsScreen(
                 Text("No facility selected. Re-authenticate to load facilities.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
+
+            // ── Facility Location (feeds AI distance prediction) ────────────
+            if (uiState.activeFacilityId > 0) {
+                FacilityLocationCard(facilityId = uiState.activeFacilityId)
+            }
+
+            // ── Reminder Gateways (SMS / Email) ─────────────────────────────
+            ReminderGatewayCard()
+
+            // ── Automatic reminders + message templates ─────────────────────
+            AutoReminderCard()
 
 
             // ── Match Threshold ─────────────────────────────
@@ -461,5 +555,274 @@ fun SettingsScreen(
             text = { Text(msg) },
             confirmButton = { TextButton(onClick = viewModel::clearError) { Text("OK") } }
         )
+    }
+}
+
+/**
+ * Captures the active facility's GPS coordinates on-site and stores them locally.
+ * These feed the distance-to-facility signal in the AI patient-monitoring engine.
+ */
+@Composable
+private fun FacilityLocationCard(facilityId: Long) {
+    val context = LocalContext.current
+    var lat by remember(facilityId) { mutableStateOf(com.carecompanion.utils.SharedPreferencesHelper.getFacilityLatitude(facilityId)) }
+    var lng by remember(facilityId) { mutableStateOf(com.carecompanion.utils.SharedPreferencesHelper.getFacilityLongitude(facilityId)) }
+    var capturedAt by remember(facilityId) { mutableStateOf(com.carecompanion.utils.SharedPreferencesHelper.getFacilityLocationCapturedAt(facilityId)) }
+    var capturing by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    fun capture() {
+        capturing = true
+        message = null
+        com.carecompanion.utils.LocationCapture.current(
+            context = context,
+            onResult = { la, lo, acc ->
+                com.carecompanion.utils.SharedPreferencesHelper.setFacilityLocation(facilityId, la, lo)
+                lat = la; lng = lo; capturedAt = System.currentTimeMillis()
+                capturing = false
+                message = "Location saved" + (acc?.let { " (±${it.toInt()}m accuracy)" } ?: "")
+            },
+            onError = { err -> capturing = false; message = err }
+        )
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) capture() else { capturing = false; message = "Location permission denied." }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.MyLocation, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Facility Location", fontWeight = FontWeight.Bold)
+            }
+            Text(
+                "Capture the facility's GPS while standing inside the clinic. The AI uses this to " +
+                "estimate each client's travel distance and flag those more likely to miss appointments.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (lat != null && lng != null) {
+                Text("Saved: ${"%.5f".format(lat)}, ${"%.5f".format(lng)}",
+                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                if (capturedAt > 0) {
+                    Text("Captured ${com.carecompanion.utils.DateUtils.formatDateTime(java.util.Date(capturedAt))}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Text("Not set — distance prediction stays inactive until captured.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
+            Button(
+                onClick = {
+                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (granted) capture()
+                    else { capturing = true; permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
+                },
+                enabled = !capturing
+            ) {
+                if (capturing) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(8.dp)); Text("Locating…")
+                } else {
+                    Icon(Icons.Default.MyLocation, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (lat != null) "Update Location" else "Capture Current Location")
+                }
+            }
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        }
+    }
+}
+
+/**
+ * Configures the cloud reminder gateways (Termii SMS, SendGrid email) used by the
+ * AI monitoring screen's "Send reminder" action. Keys are stored encrypted on-device.
+ * For production, prefer proxying sends through the WINCO backend so keys never ship
+ * in the APK.
+ */
+@Composable
+private fun ReminderGatewayCard() {
+    val sp = com.carecompanion.utils.SharedPreferencesHelper
+    var smsEnabled by remember { mutableStateOf(sp.isSmsReminderEnabled()) }
+    var termiiKey by remember { mutableStateOf(sp.getTermiiApiKey() ?: "") }
+    var senderId by remember { mutableStateOf(sp.getTermiiSenderId()) }
+    var emailEnabled by remember { mutableStateOf(sp.isEmailReminderEnabled()) }
+    var sendgridKey by remember { mutableStateOf(sp.getSendGridApiKey() ?: "") }
+    var fromEmail by remember { mutableStateOf(sp.getReminderEmailFrom() ?: "") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.NotificationsActive, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Appointment Reminders", fontWeight = FontWeight.Bold)
+            }
+            Text("Used by the AI monitoring screen to send patients neutral appointment reminders. " +
+                "Messages never mention HIV/ART to protect confidentiality.",
+                style = MaterialTheme.typography.bodySmall)
+
+            // SMS (Termii)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("SMS via Termii", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                Switch(checked = smsEnabled, onCheckedChange = { smsEnabled = it; sp.setSmsReminderEnabled(it) })
+            }
+            if (smsEnabled) {
+                OutlinedTextField(
+                    value = termiiKey, onValueChange = { termiiKey = it; sp.setTermiiApiKey(it) },
+                    label = { Text("Termii API key") }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = senderId, onValueChange = { senderId = it; sp.setTermiiSenderId(it) },
+                    label = { Text("Sender ID") }, modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+            }
+
+            HorizontalDivider()
+
+            // Email (SendGrid)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("Email via SendGrid", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                Switch(checked = emailEnabled, onCheckedChange = { emailEnabled = it; sp.setEmailReminderEnabled(it) })
+            }
+            if (emailEnabled) {
+                OutlinedTextField(
+                    value = sendgridKey, onValueChange = { sendgridKey = it; sp.setSendGridApiKey(it) },
+                    label = { Text("SendGrid API key") }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, visualTransformation = PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = fromEmail, onValueChange = { fromEmail = it; sp.setReminderEmailFrom(it) },
+                    label = { Text("From email address") }, modifier = Modifier.fillMaxWidth(),
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+                Text("Note: patient email is not yet synced, so email targets activate once an email field is added.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/**
+ * Controls automatic reminder sending (background WorkManager job) and lets the clinic
+ * compose & save a reusable message template per reminder type. Templates support the
+ * placeholders {name}, {date}, {facility}, {days}.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AutoReminderCard() {
+    val context = LocalContext.current
+    val sp = com.carecompanion.utils.SharedPreferencesHelper
+    var autoEnabled by remember { mutableStateOf(sp.isAutoReminderEnabled()) }
+    var intervalHours by remember { mutableStateOf(sp.getAutoReminderIntervalHours()) }
+    var audience by remember {
+        mutableStateOf(com.carecompanion.data.reminder.ReminderAudience.fromName(sp.getAutoReminderAudience()))
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Automatic Reminders", fontWeight = FontWeight.Bold)
+            }
+            Text("The AI decides who to remind and when — earlier and more often for clients " +
+                "predicted to default, a single courtesy reminder for reliable ones. You don't set " +
+                "the schedule; just turn it on and write the wording below.",
+                style = MaterialTheme.typography.bodySmall)
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("Let the AI send reminders", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                Switch(
+                    checked = autoEnabled,
+                    onCheckedChange = { on ->
+                        autoEnabled = on
+                        sp.setAutoReminderEnabled(on)
+                        if (on) com.carecompanion.data.reminder.ReminderWorker.enable(context, intervalHours.toLong())
+                        else com.carecompanion.data.reminder.ReminderWorker.cancel(context)
+                    }
+                )
+            }
+
+            if (autoEnabled) {
+                Text("Who to remind", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.carecompanion.data.reminder.ReminderAudience.entries.forEach { a ->
+                        FilterChip(
+                            selected = audience == a,
+                            onClick = { audience = a; sp.setAutoReminderAudience(a.name) },
+                            label = { Text(a.label) }
+                        )
+                    }
+                }
+                Text(audience.description,
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Spacer(Modifier.height(4.dp))
+                Text("How often the AI checks", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(12, 24).forEach { h ->
+                        FilterChip(
+                            selected = intervalHours == h,
+                            onClick = {
+                                intervalHours = h
+                                sp.setAutoReminderIntervalHours(h)
+                                com.carecompanion.data.reminder.ReminderWorker.scheduleNext(context, h.toLong())
+                            },
+                            label = { Text("Every ${h}h") }
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider()
+            Text("Message templates", fontWeight = FontWeight.Medium)
+            Text("Placeholders: ${com.carecompanion.data.messaging.ReminderType.PLACEHOLDERS.joinToString(" ")}",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            com.carecompanion.data.messaging.ReminderType.values().forEach { type ->
+                TemplateEditor(type)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemplateEditor(type: com.carecompanion.data.messaging.ReminderType) {
+    val sp = com.carecompanion.utils.SharedPreferencesHelper
+    var text by remember(type) { mutableStateOf(com.carecompanion.data.messaging.ReminderTemplates.templateFor(type)) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(type.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it; sp.setReminderTemplate(type.key, it) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            textStyle = MaterialTheme.typography.bodySmall
+        )
+        TextButton(
+            onClick = { sp.clearReminderTemplate(type.key); text = type.defaultTemplate },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+        ) {
+            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Reset to default", style = MaterialTheme.typography.labelSmall)
+        }
     }
 }

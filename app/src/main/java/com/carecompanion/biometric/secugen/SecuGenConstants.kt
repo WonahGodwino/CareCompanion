@@ -80,18 +80,27 @@ object SecuGenSecurityLevel {
     const val SL_HIGHEST      = 9   // ~1 in 1000000
 }
 
-/** Template format constants (SGFDxTemplateFormat) */
+/** Template format constants (SGFDxTemplateFormat).
+ *
+ * Values verified by reading SGFDxTemplateFormat.class from FDxSDKProFDAndroid.jar
+ * (constant pool entries 12-20). The SDK uses 0x0100-step values, NOT 1/2/3.
+ * Passing wrong values causes CreateTemplate to produce non-ISO output.
+ */
 object SecuGenTemplateFormat {
-    const val TEMPLATE_FORMAT_SG400      = 2   // SecuGen proprietary 400-byte fixed size
-    const val TEMPLATE_FORMAT_ISO19794   = 3   // ISO/IEC 19794-2 (interoperable)
-    const val TEMPLATE_FORMAT_ANSI378    = 4   // ANSI/INCITS 378
+    const val TEMPLATE_FORMAT_ANSI378                      = 0x0100  // 256 — ANSI/INCITS 378
+    const val TEMPLATE_FORMAT_SG400                        = 0x0200  // 512 — SecuGen proprietary 400-byte
+    const val TEMPLATE_FORMAT_ISO19794                     = 0x0300  // 768 — ISO/IEC 19794-2:2005 (FMR\0)
+    const val TEMPLATE_FORMAT_ISO19794_COMPACT             = 0x0400  // 1024 — ISO 19794-2 compact
+    const val TEMPLATE_FORMAT_ISO19794_COMPACT_NO_HEADER   = 0x0500  // 1280 — ISO 19794-2 compact, no header
 
     /** Byte buffer size to allocate for each template format */
     fun maxSize(format: Int): Int = when (format) {
-        TEMPLATE_FORMAT_SG400    -> 400
-        TEMPLATE_FORMAT_ISO19794 -> 1566  // max for ISO 19794-2 with 12 minutiae pairs
-        TEMPLATE_FORMAT_ANSI378  -> 1566
-        else                     -> 1566
+        TEMPLATE_FORMAT_SG400                      -> 400
+        TEMPLATE_FORMAT_ISO19794                   -> 1566
+        TEMPLATE_FORMAT_ISO19794_COMPACT           -> 1566
+        TEMPLATE_FORMAT_ISO19794_COMPACT_NO_HEADER -> 1566
+        TEMPLATE_FORMAT_ANSI378                    -> 1566
+        else                                       -> 1566
     }
 }
 

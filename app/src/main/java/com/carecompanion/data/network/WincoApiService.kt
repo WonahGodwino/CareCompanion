@@ -1,6 +1,8 @@
 package com.carecompanion.data.network
 
 import com.carecompanion.data.network.models.WincoBiometricResponse
+import com.carecompanion.data.network.models.WincoBulkBiometricRequest
+import com.carecompanion.data.network.models.WincoBulkBiometricResponse
 import com.carecompanion.data.network.models.WincoClientDetail
 import com.carecompanion.data.network.models.WincoClientPage
 import com.carecompanion.data.network.models.WincoFacility
@@ -55,6 +57,7 @@ interface WincoApiService {
         @Query("tx_ml_start_date") txMlStartDate: String? = null,
         @Query("tx_ml_end_date")   txMlEndDate: String? = null,
         @Query("include_archived") includeArchived: Boolean = false,
+        @Query("updated_since")    updatedSince: String? = null,
     ): WincoClientPage
 
     /**
@@ -110,6 +113,13 @@ interface WincoApiService {
     suspend fun getToken(@Body request: WincoTokenRequest): WincoTokenResponse
 
     /**
+     * Pulls the current federated risk model for a facility (Phase 2).
+     * WINCO endpoint: GET /api/knowledge/model/current?facility_id=
+     */
+    @GET("api/knowledge/model/current")
+    suspend fun getRiskModel(@Query("facility_id") facilityId: Long): com.carecompanion.data.network.models.WincoModelPacket
+
+    /**
      * Returns the list of facilities WINCO knows about.
      * Used by the Settings screen to populate the facility picker after login.
      *
@@ -139,4 +149,15 @@ interface WincoApiService {
     suspend fun getPharmacyHistory(
         @Path("person_uuid") personUuid: String,
     ): WincoPharmacyHistoryResponse
+
+    /**
+     * Bulk biometric templates — fetch templates for up to 200 patients in a single request.
+     * Replaces N individual [getBiometricTemplates] calls during the biometric sync phase.
+     *
+     * WINCO endpoint: POST /api/art/biometrics/bulk
+     */
+    @POST("api/art/biometrics/bulk")
+    suspend fun getBiometricsBulk(
+        @Body request: WincoBulkBiometricRequest,
+    ): WincoBulkBiometricResponse
 }

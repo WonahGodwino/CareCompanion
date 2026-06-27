@@ -41,6 +41,25 @@ import javax.inject.Singleton
  */
 @Singleton
 class BiometricManager @Inject constructor() {
+    /**
+     * Capture a fingerprint and return both the canonicalized template and its SHA-256 hash.
+     * Returns null on timeout or error. Throws if scanner is not SecuGen or on poor quality.
+     *
+     * Downstream code should always use the canonicalized template and hash for matching/storage.
+     */
+    suspend fun captureFingerprintWithHash(timeoutSeconds: Int = 30): Pair<ByteArray, String>? {
+        _status.value = ScannerStatus.FINGER_DETECTED
+        return try {
+            val result = (scanner as? com.carecompanion.biometric.scanner.SecuGenScanner)?.captureFingerprintWithHash(timeoutSeconds)
+            lastCaptureQuality = scanner?.getQuality() ?: 0
+            _status.value = if (scanner != null) ScannerStatus.READY else ScannerStatus.NO_FINGER
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "captureFingerprintWithHash error", e)
+            _status.value = ScannerStatus.ERROR
+            throw e
+        }
+    }
 
     data class ScannerInfo(
         val usbDeviceDetected: Boolean,

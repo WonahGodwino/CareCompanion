@@ -1,44 +1,49 @@
 ﻿package com.carecompanion.data.repository
 
-data class SyncAudit(
-    val pagesRead: Int = 0,
-    val uniquePatientsSaved: Int = 0,
-    val biometricCandidates: Int = 0,
-    val biometricsSaved: Int = 0,
-    val biometricsSkipped: Int = 0,
-    val biometricsFailed: Int = 0,
-    val viralLoadHistorySaved: Int = 0,
-    val pharmacyHistorySaved: Int = 0,
-)
-
-sealed class SyncResult {
-    data class Success(
-        val patientsAdded: Int,
-        val biometricsAdded: Int,
-        val viralLoadHistoryAdded: Int = 0,
-        val pharmacyHistoryAdded: Int = 0,
-        val audit: SyncAudit = SyncAudit(),
-    ) : SyncResult()
-    data class Error(val message: String) : SyncResult()
-    object NoNetwork : SyncResult()
-    object NotConfigured : SyncResult()
-}
-
 interface SyncRepository {
-    suspend fun syncAll(onProgress: ((String) -> Unit)? = null): SyncResult
-    suspend fun getLastSyncInfo(): String?
-    fun resetSyncPage()
+    // Standards-based biometric helpers
+    suspend fun enrollBiometric(
+        patientUuid: String,
+        fingerType: String,
+        template: ByteArray,
+        quality: Int,
+        facilityId: Long? = null,
+        userId: String? = null
+    ): Boolean
 
-    // Biometric matching
-    suspend fun findPatientByBiometric(
+    /**
+     * 1:N global identification.
+     * [sdkMatcher] — vendor SDK scoring function (probe, reference) → score 0–100.
+     * When non-null the SDK score is used; custom matcher is the offline fallback.
+     */
+    suspend fun identifyBiometric(
         capturedTemplate: ByteArray,
-        facilityId: Long? = null
+        facilityId: Long? = null,
+        userId: String? = null,
+        sdkMatcher: ((ByteArray, ByteArray) -> Double)? = null
     ): SyncRepositoryImpl.PatientMatchResult?
 
-    suspend fun findPatientByBiometricForVerification(
+    /**
+     * 1:1 facility-scoped verification.
+     * [sdkMatcher] — vendor SDK scoring function (probe, reference) → score 0–100.
+     * When non-null the SDK score is used; custom matcher is the offline fallback.
+     */
+    suspend fun verifyBiometric(
         capturedTemplate: ByteArray,
         personUuid: String,
         fingerType: String,
-        facilityId: Long? = null
+        facilityId: Long? = null,
+        userId: String? = null,
+        sdkMatcher: ((ByteArray, ByteArray) -> Double)? = null
     ): SyncRepositoryImpl.PatientMatchResult?
+
+    // Debug methods (remove in production)
+    suspend fun debugTemplateComparison(capturedTemplate: ByteArray)
+    suspend fun testIdentification(patientUuid: String): SyncRepositoryImpl.PatientMatchResult?
+    suspend fun testVerification(patientUuid: String): Boolean
+
+    // Add missing methods for DI consistency
+    suspend fun syncAll(onProgress: ((String) -> Unit)? = null): SyncResult
+    suspend fun getLastSyncInfo(): String?
+    fun resetSyncPage()
 }
