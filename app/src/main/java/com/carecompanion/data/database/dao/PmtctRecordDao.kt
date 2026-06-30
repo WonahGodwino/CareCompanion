@@ -25,4 +25,7 @@ interface PmtctRecordDao {
         """
     )
     fun observeWorklist(): Flow<List<PmtctRecord>>
+
+    @Query("SELECT * FROM pmtct_record")
+    suspend fun getAll(): List<PmtctRecord>
 }

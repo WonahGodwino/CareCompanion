@@ -1,6 +1,9 @@
 package com.carecompanion.data.risk
 
 import android.content.Context
+import com.carecompanion.data.database.dao.EacEpisodeDao
+import com.carecompanion.data.database.dao.InfantRecordDao
+import com.carecompanion.data.database.dao.PmtctRecordDao
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.messaging.ReminderContext
 import com.carecompanion.data.messaging.ReminderTarget
@@ -55,8 +58,18 @@ data class RiskAssessment(
 @Singleton
 class RiskAssessmentService @Inject constructor(
     private val patientRepository: PatientRepository,
+    private val eacEpisodeDao: EacEpisodeDao,
+    private val pmtctRecordDao: PmtctRecordDao,
+    private val infantRecordDao: InfantRecordDao,
     @ApplicationContext private val context: Context,
 ) {
+    // Cascade gaps (VL/EAC, PMTCT, EID, TB) can elevate triage even when IIT-forecast risk is low.
+    private val cascadeDomains = setOf(
+        PatientRiskEngine.RiskDomain.VIROLOGIC, PatientRiskEngine.RiskDomain.PMTCT,
+        PatientRiskEngine.RiskDomain.EID, PatientRiskEngine.RiskDomain.TB,
+    )
+
+    private fun severityRank(s: String?): Int = when (s) { "critical" -> 0; "high" -> 1; else -> 2 }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun sourceFlow(): Flow<List<IITClient>> = flowOf(Unit).flatMapLatest {
@@ -86,6 +99,12 @@ class RiskAssessmentService @Inject constructor(
             .filter { (it.archived ?: 0) == 0 }
             .map { it.personUuid }
             .toHashSet()
+
+        // Cascade gaps synced on-device (small cohorts) — index by the client they belong to.
+        val eacByUuid = eacEpisodeDao.getAll().groupBy { it.personUuid }
+        val pmtctByUuid = pmtctRecordDao.getAll().associateBy { it.personUuid }
+        val infantsByMother = infantRecordDao.getAll()
+            .filter { it.motherPersonUuid != null }.groupBy { it.motherPersonUuid }
 
         // Adopted learned model, if any (guardrail + schema enforced in activeModel()).
         val learnedModel = ModelStore.activeModel()
@@ -121,6 +140,12 @@ class RiskAssessmentService @Inject constructor(
                 TimeUnit.MILLISECONDS.toDays(now - it.time) > 365
             } ?: true // never screened counts as due
 
+            // ── Cascade gaps for this client (EAC / PMTCT / EID) ────────────
+            val eacLatest = eacByUuid[c.uuid]?.maxByOrNull { it.triggerDate?.time ?: Long.MIN_VALUE }
+            val pmtct = pmtctByUuid[c.uuid]
+            val infants = infantsByMother[c.uuid].orEmpty()
+            val topInfant = infants.filter { it.gapType != null }.minByOrNull { severityRank(it.gapSeverity) }
+
             val history = PatientRiskEngine.analyzeHistory(historyByUuid[c.uuid].orEmpty())
             var score = PatientRiskEngine.score(
                 PatientSignals(
@@ -141,11 +166,22 @@ class RiskAssessmentService @Inject constructor(
                     lastViralLoadResult = patient?.lastViralLoadResult,
                     lastViralLoadDate = patient?.lastViralLoadDate,
                     viralLoadOverdue = vlOverdue,
+                    eacSessionsCompleted = eacLatest?.sessions,
+                    eacStage = eacLatest?.stage,
                     // TB / TPT
                     tbScreenOverdue = tbScreenOverdue,
                     tbSymptomatic = tbSymptomatic,
                     // Identity
                     biometricEnrolled = c.uuid in enrolledUuids,
+                    // PMTCT (mother)
+                    pregnantOrBreastfeeding = pmtct != null,
+                    pmtctVlGap = pmtct?.gapType,
+                    pmtctGaWeeks = pmtct?.gaWeeks,
+                    fetalHighRisk = pmtct?.fetalHighRisk ?: false,
+                    // EID (exposed infant of this client)
+                    exposedInfantGap = topInfant?.gapType,
+                    exposedInfantHighRisk = infants.any { it.highRisk },
+                    exposedInfantCount = infants.size,
                 )
             )
 
@@ -169,9 +205,13 @@ class RiskAssessmentService @Inject constructor(
                 val modelFactor = PatientRiskEngine.RiskFactor(
                     PatientRiskEngine.RiskDomain.HISTORY, "AI model forecast risk: $pct%", pct,
                 )
+                // Unified priority = the more urgent of IIT-forecast risk and any cascade gap, so an
+                // unsuppressed VL / PMTCT-VL-overdue / infant-PCR+ still elevates a low-IIT-risk client.
+                val cascadeSum = score.factors.filter { it.domain in cascadeDomains }.sumOf { it.points }
+                val finalScore = maxOf(pct, cascadeSum).coerceIn(0, 100)
                 score = score.copy(
-                    score = pct,
-                    band = bandForProbability(p),
+                    score = finalScore,
+                    band = if (cascadeSum > pct) PatientRiskEngine.bandForScore(finalScore) else bandForProbability(p),
                     factors = listOf(modelFactor) + score.factors,
                 )
             }

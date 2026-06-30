@@ -51,6 +51,7 @@ object PatientRiskEngine {
         TB("TB / TPT"),
         BIOMETRIC("Identity"),
         PMTCT("PMTCT"),
+        EID("Exposed Infant"),
         DEMOGRAPHIC("Demographic"),
     }
 
@@ -93,6 +94,7 @@ object PatientRiskEngine {
         val lastViralLoadDate: Date? = null,
         val viralLoadOverdue: Boolean = false,    // routine/baseline VL is due/overdue
         val eacSessionsCompleted: Int? = null,    // of 3, after an unsuppressed result
+        val eacStage: String? = null,             // NOT_STARTED | IN_PROGRESS | COMPLETE | STOPPED
         // ── TB / TPT ───────────────────────────────────────────────
         val tbScreenOverdue: Boolean = false,
         val tbSymptomatic: Boolean? = null,       // presumptive / positive screen
@@ -100,8 +102,15 @@ object PatientRiskEngine {
         val tptEligibleNotStarted: Boolean = false,
         // ── Identity / biometric ───────────────────────────────────
         val biometricEnrolled: Boolean? = null,
-        // ── PMTCT ──────────────────────────────────────────────────
+        // ── PMTCT (mother) ─────────────────────────────────────────
         val pregnantOrBreastfeeding: Boolean? = null,
+        val pmtctVlGap: String? = null,           // PMTCT_VL_DUE | PMTCT_VL_OVERDUE (32–36wk, code 306)
+        val pmtctGaWeeks: Int? = null,
+        val fetalHighRisk: Boolean = false,       // baby will be high-risk → enhanced prophylaxis at birth
+        // ── EID (this client's HIV-exposed infant) ─────────────────
+        val exposedInfantGap: String? = null,     // top infant cascade gap (e.g. EID_PCR_DUE, INFANT_HIV_POSITIVE)
+        val exposedInfantHighRisk: Boolean = false,
+        val exposedInfantCount: Int = 0,
     )
 
     data class PatientRiskScore(
@@ -150,6 +159,14 @@ object PatientRiskEngine {
         )
     }
 
+    /** Map an additive 0–100 risk total to a triage band. */
+    fun bandForScore(total: Int): RiskBand = when {
+        total >= 75 -> RiskBand.CRITICAL
+        total >= 50 -> RiskBand.HIGH
+        total >= 30 -> RiskBand.MODERATE
+        else        -> RiskBand.LOW
+    }
+
     /** Score any patient from the full signal set. Dimensions are independent and additive. */
     fun score(s: PatientSignals): PatientRiskScore {
         val factors = mutableListOf<RiskFactor>()
@@ -162,14 +179,10 @@ object PatientRiskEngine {
         scoreTb(s, factors)
         scoreIdentity(s, factors)
         scorePmtct(s, factors)
+        scoreInfant(s, factors)
 
         val total = factors.sumOf { it.points }.coerceIn(0, 100)
-        val band = when {
-            total >= 75 -> RiskBand.CRITICAL
-            total >= 50 -> RiskBand.HIGH
-            total >= 30 -> RiskBand.MODERATE
-            else        -> RiskBand.LOW
-        }
+        val band = bandForScore(total)
         val approaching = s.daysOverdue in 1..IIT_THRESHOLD_DAYS
         val daysUntilIit = (IIT_THRESHOLD_DAYS + 1 - s.daysOverdue).coerceAtLeast(0)
         val forecast = s.daysOverdue == 0 && (s.daysUntilAppointment ?: -1) >= 0
@@ -286,10 +299,15 @@ object PatientRiskEngine {
         if (vl != null && vl >= 1000) {
             out += RiskFactor(RiskDomain.VIROLOGIC, "Unsuppressed viral load ($vl c/mL)", 25)
             // EAC: 3 sessions are required after an unsuppressed result before VL recheck.
-            when (val done = s.eacSessionsCompleted) {
-                null, 0 -> out += RiskFactor(RiskDomain.VIROLOGIC, "EAC not started after unsuppressed VL", 15)
-                in 1..2 -> out += RiskFactor(RiskDomain.VIROLOGIC, "EAC incomplete ($done of 3 sessions)", 8)
-                else    -> { /* EAC complete — VL recheck pathway, no extra penalty */ }
+            when {
+                s.eacStage == "STOPPED" ->
+                    out += RiskFactor(RiskDomain.VIROLOGIC, "EAC stopped before completion while unsuppressed", 14)
+                s.eacStage == "COMPLETE" || (s.eacSessionsCompleted ?: 0) >= 3 ->
+                    { /* EAC complete — on the Post-EAC VL recheck pathway, no extra penalty */ }
+                (s.eacSessionsCompleted ?: 0) in 1..2 ->
+                    out += RiskFactor(RiskDomain.VIROLOGIC, "EAC incomplete (${s.eacSessionsCompleted} of 3 sessions)", 8)
+                else ->
+                    out += RiskFactor(RiskDomain.VIROLOGIC, "EAC not started after unsuppressed VL", 15)
             }
         }
         if (s.viralLoadOverdue) out += RiskFactor(RiskDomain.VIROLOGIC, "Routine viral load overdue", 10)
@@ -308,9 +326,33 @@ object PatientRiskEngine {
     }
 
     private fun scorePmtct(s: PatientSignals, out: MutableList<RiskFactor>) {
-        // A pregnant/breastfeeding client off ART carries vertical-transmission risk.
-        if (s.pregnantOrBreastfeeding == true && (s.daysOverdue > 0 || (s.lastViralLoadResult ?: 0) >= 1000)) {
+        val gaTxt = s.pmtctGaWeeks?.let { " (GA ${it}wk)" } ?: ""
+        when (s.pmtctVlGap) {
+            "PMTCT_VL_OVERDUE" -> out += RiskFactor(RiskDomain.PMTCT, "PMTCT VL overdue$gaTxt — MTCT risk", 22)
+            "PMTCT_VL_DUE"     -> out += RiskFactor(RiskDomain.PMTCT, "PMTCT VL due$gaTxt (32–36wk window)", 15)
+        }
+        if (s.fetalHighRisk) {
+            out += RiskFactor(RiskDomain.PMTCT, "Fetus high-risk — prepare enhanced infant prophylaxis at birth", 12)
+        }
+        // Fallback when the PMTCT cascade isn't synced but the client is flagged pregnant + at risk.
+        if (s.pregnantOrBreastfeeding == true && s.pmtctVlGap == null && !s.fetalHighRisk &&
+            (s.daysOverdue > 0 || (s.lastViralLoadResult ?: 0) >= 1000)) {
             out += RiskFactor(RiskDomain.PMTCT, "Pregnant/breastfeeding with adherence or VL risk", 15)
+        }
+    }
+
+    /** EID — this client's HIV-exposed infant (action falls on the mother: bring the infant in). */
+    private fun scoreInfant(s: PatientSignals, out: MutableList<RiskFactor>) {
+        when (s.exposedInfantGap) {
+            "INFANT_HIV_POSITIVE" -> out += RiskFactor(RiskDomain.EID, "Exposed infant PCR POSITIVE — initiate paediatric ART", 25)
+            "INFANT_ARV_MISSING"  -> out += RiskFactor(RiskDomain.EID, "Exposed infant: no ARV prophylaxis recorded", 18)
+            "EID_PCR_DUE"         -> out += RiskFactor(RiskDomain.EID, "Exposed infant: EID PCR due/overdue", 16)
+            "PCR_RESULT_PENDING"  -> out += RiskFactor(RiskDomain.EID, "Exposed infant: EID PCR result pending", 8)
+            "CTX_NOT_STARTED"     -> out += RiskFactor(RiskDomain.EID, "Exposed infant: cotrimoxazole not started", 8)
+            "FINAL_ANTIBODY_DUE"  -> out += RiskFactor(RiskDomain.EID, "Exposed infant: 18-month confirmatory test due", 8)
+        }
+        if (s.exposedInfantHighRisk && s.exposedInfantGap == null && s.exposedInfantCount > 0) {
+            out += RiskFactor(RiskDomain.EID, "High-risk exposed infant in follow-up", 6)
         }
     }
 
@@ -325,8 +367,16 @@ object PatientRiskEngine {
         forecast: Boolean,
     ): String {
         // Surface the most clinically urgent action first.
+        if (s.exposedInfantGap == "INFANT_HIV_POSITIVE")
+            return "Exposed infant PCR POSITIVE — initiate paediatric ART and confirm; counsel the mother today."
         if (factors.any { it.domain == RiskDomain.TB && it.label.startsWith("Presumptive") })
             return "Refer for TB evaluation (GeneXpert) today before routine ART services."
+        if (s.pmtctVlGap == "PMTCT_VL_OVERDUE")
+            return "PMTCT VL overdue (GA ${s.pmtctGaWeeks ?: "?"}wk): collect the maternal VL now to assess MTCT risk."
+        if (s.exposedInfantGap == "EID_PCR_DUE" || s.exposedInfantGap == "INFANT_ARV_MISSING")
+            return "Recall the mother to bring the exposed infant for ARV prophylaxis / EID DNA-PCR."
+        if (s.pmtctVlGap == "PMTCT_VL_DUE")
+            return "PMTCT priority: collect the 32–36 week maternal VL; confirm ART continuation."
         if (s.pregnantOrBreastfeeding == true)
             return "PMTCT priority: trace today, confirm ART continuation and infant prophylaxis."
         if ((s.lastViralLoadResult ?: 0) >= 1000)

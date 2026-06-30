@@ -24,4 +24,7 @@ interface InfantRecordDao {
         """
     )
     fun observeWorklist(): Flow<List<InfantRecord>>
+
+    @Query("SELECT * FROM infant_record")
+    suspend fun getAll(): List<InfantRecord>
 }

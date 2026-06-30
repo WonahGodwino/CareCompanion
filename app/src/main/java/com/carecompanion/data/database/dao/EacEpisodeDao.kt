@@ -24,6 +24,9 @@ interface EacEpisodeDao {
     )
     suspend fun getByPersonUuid(personUuid: String): List<EacEpisode>
 
+    @Query("SELECT * FROM eac_episode")
+    suspend fun getAll(): List<EacEpisode>
+
     // Clients with an EAC episode left incomplete/stopped — candidates for a follow-up worklist.
     @Query(
         """
