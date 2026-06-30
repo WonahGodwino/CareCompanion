@@ -71,6 +71,10 @@ class RiskAssessmentService @Inject constructor(
 
     private fun severityRank(s: String?): Int = when (s) { "critical" -> 0; "high" -> 1; else -> 2 }
 
+    private val cascadeReminderTypes = setOf(
+        ReminderType.PMTCT_RECALL, ReminderType.EID_RECALL, ReminderType.EAC_RECALL,
+    )
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun sourceFlow(): Flow<List<IITClient>> = flowOf(Unit).flatMapLatest {
         val fid = SharedPreferencesHelper.getActiveFacilityId(context)
@@ -216,9 +220,16 @@ class RiskAssessmentService @Inject constructor(
                 )
             }
 
+            // An actively-lapsing client gets the return-to-care message (the cascade happens when they
+            // come). An up-to-date client with a cascade gap gets the targeted, more-actionable recall.
+            val unsuppressed = (patient?.lastViralLoadResult ?: 0L) >= 1000L
+            val eacIncomplete = eacLatest != null && eacLatest.stage != "COMPLETE" && eacLatest.sessions < 3
             val type = when {
                 score.isApproachingIit -> ReminderType.APPROACHING_IIT
                 daysOverdue > IIT_THRESHOLD_DAYS -> ReminderType.ESTABLISHED_IIT
+                topInfant?.gapType != null -> ReminderType.EID_RECALL
+                pmtct?.gapType != null -> ReminderType.PMTCT_RECALL
+                unsuppressed && eacIncomplete -> ReminderType.EAC_RECALL
                 else -> ReminderType.FORECAST
             }
             AssessedClient(
@@ -236,8 +247,11 @@ class RiskAssessmentService @Inject constructor(
         }
 
         return RiskAssessment(
-            forecast = assessed.filter { it.score.isForecast && it.score.band != RiskBand.LOW }
-                .sortedByDescending { it.score.score },
+            // Up-to-date clients are flagged when band is Moderate+, OR when they carry a cascade recall
+            // (a PMTCT/EID/EAC gap is actionable even at a low IIT-forecast band).
+            forecast = assessed.filter {
+                it.score.isForecast && (it.score.band != RiskBand.LOW || it.type in cascadeReminderTypes)
+            }.sortedByDescending { it.score.score },
             approaching = assessed.filter { it.score.isApproachingIit }
                 .sortedByDescending { it.score.score },
             established = assessed.filter { it.score.daysOverdue > IIT_THRESHOLD_DAYS }

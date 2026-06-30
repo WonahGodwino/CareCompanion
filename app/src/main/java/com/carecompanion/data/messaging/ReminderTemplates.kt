@@ -31,6 +31,26 @@ enum class ReminderType(
         "Missed appointment (28+ days)",
         "Hello {name}, our records show you missed a recent clinic appointment. " +
             "Please visit {facility} to continue your care. Thank you.",
+    ),
+
+    // ── Cascade recalls — deliberately NEUTRAL (no HIV/VL/EID disclosure over SMS) ──────────────
+    PMTCT_RECALL(
+        "pmtct",
+        "PMTCT — maternal test due",
+        "Hello {name}, an important routine check for you and your baby's health is due. " +
+            "Please visit {facility} soon. Thank you.",
+    ),
+    EID_RECALL(
+        "eid",
+        "Infant check-up / test due",
+        "Hello {name}, please bring your baby to {facility} for a scheduled check-up and test. " +
+            "Thank you.",
+    ),
+    EAC_RECALL(
+        "eac",
+        "Adherence review session",
+        "Hello {name}, please visit {facility} for a short review and counselling session " +
+            "to support your treatment. Thank you.",
     );
 
     companion object {
