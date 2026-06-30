@@ -33,6 +33,8 @@ data class InfantRecord(
     val pcrResultReceived: Boolean = false,
     val antibodyDone: Boolean = false,
     val outcome18m: String? = null,
+    val finalResultKnown: Boolean = false,     // high-risk shown until the 18-mo final result is known
+    val interventionsSummary: String? = null,  // full timeline of interventions given to the infant
     val gapType: String? = null,        // primary (highest-severity) gap
     val gapSeverity: String? = null,
     val gapMessage: String? = null,

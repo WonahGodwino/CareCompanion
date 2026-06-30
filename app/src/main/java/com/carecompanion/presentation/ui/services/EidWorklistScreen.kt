@@ -127,7 +127,17 @@ private fun InfantCard(r: InfantRecord) {
             }
             if (r.highRisk && r.highRiskReason != null) {
                 Spacer(Modifier.height(4.dp))
-                Text(r.highRiskReason, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    r.highRiskReason + if (!r.finalResultKnown) " · high-risk until 18-mo result" else "",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!r.interventionsSummary.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Given: ${r.interventionsSummary}",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

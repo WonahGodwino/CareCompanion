@@ -111,6 +111,17 @@ private fun PmtctCard(item: PmtctWorklistItem) {
                 )
             }
             r.hospitalNumber?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (r.fetalHighRisk) {
+                Spacer(Modifier.height(4.dp))
+                Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFAD1457).copy(alpha = 0.12f)) {
+                    Text(
+                        "FETUS HIGH-RISK — prepare enhanced infant prophylaxis at birth" +
+                            (r.fetalHighRiskReason?.let { " ($it)" } ?: ""),
+                        color = Color(0xFFAD1457), fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(6.dp))
             if (r.gapMessage != null) {
                 Surface(shape = RoundedCornerShape(6.dp), color = accent.copy(alpha = 0.12f)) {

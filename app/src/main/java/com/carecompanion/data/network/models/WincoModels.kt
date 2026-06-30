@@ -233,6 +233,8 @@ data class WincoPmtctItem(
     @SerializedName("currently_pregnant") val currentlyPregnant: Boolean = false,
     @SerializedName("pmtct_vl_done")      val pmtctVlDone: Boolean = false,
     @SerializedName("tx_curr")            val txCurr: Boolean = false,
+    @SerializedName("fetal_high_risk")        val fetalHighRisk: Boolean = false,
+    @SerializedName("fetal_high_risk_reason") val fetalHighRiskReason: String? = null,
     @SerializedName("gaps")               val gaps: List<WincoPmtctGap> = emptyList(),
 )
 
@@ -270,6 +272,8 @@ data class WincoInfantItem(
     @SerializedName("pcr_result_received") val pcrResultReceived: Boolean = false,
     @SerializedName("antibody_done")       val antibodyDone: Boolean = false,
     @SerializedName("outcome_18m")         val outcome18m: String? = null,
+    @SerializedName("final_result_known")  val finalResultKnown: Boolean = false,
+    @SerializedName("interventions_summary") val interventionsSummary: String? = null,
     @SerializedName("gaps")                val gaps: List<WincoPmtctGap> = emptyList(),
 )
 

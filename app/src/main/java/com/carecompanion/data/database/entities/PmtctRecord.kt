@@ -26,6 +26,8 @@ data class PmtctRecord(
     val currentlyPregnant: Boolean = true,
     val pmtctVlDone: Boolean = false,
     val txCurr: Boolean = false,
+    val fetalHighRisk: Boolean = false,        // baby will be high-risk → prep enhanced prophylaxis at birth
+    val fetalHighRiskReason: String? = null,
     val gapType: String? = null,       // PMTCT_VL_DUE | PMTCT_VL_OVERDUE | null
     val gapSeverity: String? = null,   // critical | high
     val gapMessage: String? = null,
