@@ -71,4 +71,16 @@ object ModelStore {
         if (m.auc < m.heuristicAuc) return null                          // guardrail
         return m
     }
+
+    // ── EAC cascade-failure head (second outcome) ───────────────────────────────
+    fun saveEac(model: LearnedRiskModel) =
+        SharedPreferencesHelper.setEacModelJson(gson.toJson(model))
+
+    /** The EAC head for live scoring (schema-guarded). Adoption gate is enforced server-side. */
+    fun eacModel(): LearnedRiskModel? {
+        val m = SharedPreferencesHelper.getEacModelJson()?.let {
+            runCatching { gson.fromJson(it, LearnedRiskModel::class.java) }.getOrNull()
+        } ?: return null
+        return if (m.schemaVersion == EacFeatures.SCHEMA_VERSION) m else null
+    }
 }

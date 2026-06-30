@@ -120,7 +120,10 @@ interface WincoApiService {
      * WINCO endpoint: GET /api/knowledge/model/current?facility_id=
      */
     @GET("api/knowledge/model/current")
-    suspend fun getRiskModel(@Query("facility_id") facilityId: Long): com.carecompanion.data.network.models.WincoModelPacket
+    suspend fun getRiskModel(
+        @Query("facility_id") facilityId: Long,
+        @Query("outcome") outcome: String = "iit",   // prediction head: iit | eac_failure
+    ): com.carecompanion.data.network.models.WincoModelPacket
 
     /**
      * Returns the list of facilities WINCO knows about.

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.carecompanion.data.network.WincoApiService
 import com.carecompanion.data.risk.BacktestResult
+import com.carecompanion.data.risk.EacFeatures
 import com.carecompanion.data.risk.LearnedRiskModel
 import com.carecompanion.data.risk.ModelStore
 import com.carecompanion.data.risk.RiskBacktestService
@@ -70,7 +71,7 @@ class ModelValidationViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(message = "Pulling model from WINCO…")
         viewModelScope.launch {
             runCatching {
-                wincoApi.getRiskModel(SharedPreferencesHelper.getActiveFacilityId(context))
+                wincoApi.getRiskModel(SharedPreferencesHelper.getActiveFacilityId(context), outcome = "iit")
             }.onSuccess { p ->
                 if (p.schemaVersion != RiskFeatures.SCHEMA_VERSION) {
                     _uiState.value = _uiState.value.copy(
@@ -90,6 +91,25 @@ class ModelValidationViewModel @Inject constructor(
                     trainedAt = System.currentTimeMillis(),
                 )
                 ModelStore.save(model)
+
+                // Also pull the EAC cascade-failure head (second prediction outcome).
+                runCatching {
+                    wincoApi.getRiskModel(SharedPreferencesHelper.getActiveFacilityId(context), outcome = "eac_failure")
+                }.onSuccess { ep ->
+                    if (ep.schemaVersion == EacFeatures.SCHEMA_VERSION) {
+                        ModelStore.saveEac(
+                            LearnedRiskModel(
+                                schemaVersion = ep.schemaVersion, featureNames = ep.featureNames,
+                                weights = ep.weights.toDoubleArray(), bias = ep.bias,
+                                mean = ep.scaling.mean.toDoubleArray(), std = ep.scaling.std.toDoubleArray(),
+                                nSamples = ep.training.nSamples, auc = ep.training.auc ?: 0.0,
+                                heuristicAuc = ep.training.heuristicAuc ?: 0.0,
+                                trainedAt = System.currentTimeMillis(),
+                            )
+                        )
+                    }
+                }
+
                 _uiState.value = _uiState.value.copy(
                     activeMode = ModelStore.mode(),
                     message = "Pulled facility model (CV-AUC ${"%.2f".format(model.auc)}, " +

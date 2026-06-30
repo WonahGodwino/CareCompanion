@@ -4,6 +4,7 @@ import android.content.Context
 import com.carecompanion.data.database.dao.EacEpisodeDao
 import com.carecompanion.data.database.dao.InfantRecordDao
 import com.carecompanion.data.database.dao.PmtctRecordDao
+import com.carecompanion.data.database.dao.ViralLoadHistoryDao
 import com.carecompanion.data.database.entities.IITClient
 import com.carecompanion.data.messaging.ReminderContext
 import com.carecompanion.data.messaging.ReminderTarget
@@ -61,6 +62,7 @@ class RiskAssessmentService @Inject constructor(
     private val eacEpisodeDao: EacEpisodeDao,
     private val pmtctRecordDao: PmtctRecordDao,
     private val infantRecordDao: InfantRecordDao,
+    private val viralLoadHistoryDao: ViralLoadHistoryDao,
     @ApplicationContext private val context: Context,
 ) {
     // Cascade gaps (VL/EAC, PMTCT, EID, TB) can elevate triage even when IIT-forecast risk is low.
@@ -112,6 +114,11 @@ class RiskAssessmentService @Inject constructor(
 
         // Adopted learned model, if any (guardrail + schema enforced in activeModel()).
         val learnedModel = ModelStore.activeModel()
+        // EAC cascade-failure head (second outcome) + VL history for its prior-unsuppressed feature.
+        val eacHead = ModelStore.eacModel()
+        val vlByUuid = if (eacHead != null)
+            viralLoadHistoryDao.getByPersonUuids(clients.map { it.uuid }).groupBy { it.personUuid }
+        else emptyMap()
 
         val now = System.currentTimeMillis()
         val today = Date(now)
@@ -218,6 +225,40 @@ class RiskAssessmentService @Inject constructor(
                     band = if (cascadeSum > pct) PatientRiskEngine.bandForScore(finalScore) else bandForProbability(p),
                     factors = listOf(modelFactor) + score.factors,
                 )
+            }
+
+            // EAC cascade-failure head: for an unsuppressed client, forecast re-suppression failure and
+            // surface it as an explainable factor that elevates triage (2nd prediction head, eac-v1).
+            if (eacHead != null && (patient?.lastViralLoadResult ?: 0L) >= 1000L) {
+                val priorUns = ((vlByUuid[c.uuid]?.count { (it.resultNumeric ?: 0L) >= 1000L } ?: 0) - 1)
+                    .coerceAtLeast(0)
+                val monthsOnArt = patient?.artStartDate?.let { ((now - it.time) / (30L * 86_400_000L)).toInt() } ?: 0
+                val feat = EacFeatures.vector(
+                    triggerVl = patient?.lastViralLoadResult ?: 0L,
+                    monthsOnArt = monthsOnArt,
+                    age = DateUtils.calculateAge(patient?.dateOfBirth ?: c.dateOfBirth),
+                    priorUnsuppressed = priorUns,
+                    nVisits = history.totalVisits,
+                    iitEpisodes = history.priorIitEpisodes,
+                    latePickups = history.priorLatePickups,
+                    hadPriorEac = eacByUuid[c.uuid]?.isNotEmpty() == true,
+                )
+                val pct = (eacHead.probability(feat) * 100).roundToInt()
+                if (pct >= 40) {
+                    val f = PatientRiskEngine.RiskFactor(
+                        PatientRiskEngine.RiskDomain.VIROLOGIC,
+                        "AI: high risk of EAC re-suppression failure ($pct%) — escalate adherence support",
+                        (pct / 4).coerceIn(0, 25),
+                    )
+                    val cascadeSum = (score.factors + f).filter { it.domain in cascadeDomains }.sumOf { it.points }
+                    val newScore = maxOf(score.score, cascadeSum).coerceAtMost(100)
+                    val b2 = PatientRiskEngine.bandForScore(newScore)
+                    score = score.copy(
+                        factors = listOf(f) + score.factors,
+                        score = newScore,
+                        band = if (b2.ordinal < score.band.ordinal) b2 else score.band,
+                    )
+                }
             }
 
             // An actively-lapsing client gets the return-to-care message (the cascade happens when they

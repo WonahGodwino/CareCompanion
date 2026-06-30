@@ -147,6 +147,10 @@ object SharedPreferencesHelper {
     fun setLearnedModelJson(json: String) = prefs().edit().putString("learned_model_json", json).apply()
     fun clearLearnedModel() = prefs().edit().remove("learned_model_json").remove("risk_scoring_mode").apply()
 
+    // Second prediction head: EAC cascade-failure (outcome='eac_failure').
+    fun getEacModelJson(): String? = prefs().getString("eac_model_json", null)
+    fun setEacModelJson(json: String) = prefs().edit().putString("eac_model_json", json).apply()
+
     /** De-dupe: last epoch-day (WAT) a reminder was sent to a patient. 0 = never. */
     fun getReminderLastSentEpochDay(uuid: String): Int = prefs().getInt("reminder_sent_$uuid", 0)
     fun setReminderLastSentEpochDay(uuid: String, epochDay: Int) =
