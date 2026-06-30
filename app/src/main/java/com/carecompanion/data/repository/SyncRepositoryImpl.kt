@@ -1113,6 +1113,7 @@ class SyncRepositoryImpl @Inject constructor(
             sessions = sessions,
             triggerVl = triggerVl,
             triggerDate = DateUtils.parseDate(triggerDate),
+            lastSessionDate = DateUtils.parseDate(lastSessionDate),
             repeatVl = repeatVl,
             regimenSwitched = regimenSwitched,
             lastSyncDate = Date(),

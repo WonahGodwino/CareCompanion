@@ -210,6 +210,7 @@ data class WincoEacEpisode(
     @SerializedName("sessions")         val sessions: Int = 0,
     @SerializedName("trigger_vl")       val triggerVl: Double? = null,
     @SerializedName("trigger_date")     val triggerDate: String? = null,
+    @SerializedName("last_session_date") val lastSessionDate: String? = null,
     @SerializedName("repeat_vl")        val repeatVl: Double? = null,
     @SerializedName("regimen_switched") val regimenSwitched: Boolean = false,
 )

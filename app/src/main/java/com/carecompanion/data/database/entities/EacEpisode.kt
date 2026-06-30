@@ -32,6 +32,7 @@ data class EacEpisode(
     val sessions: Int = 0,
     val triggerVl: Double? = null,     // VL that triggered the episode
     val triggerDate: Date? = null,
+    val lastSessionDate: Date? = null, // latest EAC session date — drives the 30-day "session due" cadence
     val repeatVl: Double? = null,      // Post-EAC repeat VL (null until done)
     val regimenSwitched: Boolean = false,
     val lastSyncDate: Date,
