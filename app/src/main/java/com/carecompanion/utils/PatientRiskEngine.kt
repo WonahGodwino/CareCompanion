@@ -95,6 +95,7 @@ object PatientRiskEngine {
         val viralLoadOverdue: Boolean = false,    // routine/baseline VL is due/overdue
         val eacSessionsCompleted: Int? = null,    // of 3, after an unsuppressed result
         val eacStage: String? = null,             // NOT_STARTED | IN_PROGRESS | COMPLETE | STOPPED
+        val priorUnsuppressed: Int = 0,           // count of prior unsuppressed VLs (rebound history)
         // ── TB / TPT ───────────────────────────────────────────────
         val tbScreenOverdue: Boolean = false,
         val tbSymptomatic: Boolean? = null,       // presumptive / positive screen
@@ -310,6 +311,29 @@ object PatientRiskEngine {
                     out += RiskFactor(RiskDomain.VIROLOGIC, "EAC not started after unsuppressed VL", 15)
             }
         }
+        else if (vl != null && vl < 1000) {
+            // Virological-failure WATCH (rule-based, transparent early-warning — "Gate 1"): a suppressed
+            // client showing signs of impending failure BEFORE the unsuppressed VL. Not an ML prediction
+            // (that did not validate on available data) — an explainable rule from the true drivers:
+            // low-level viraemia, poor adherence, and a history of unsuppression.
+            val lowLevelViremia = vl in 200..999
+            val adherenceRisk = s.history.priorIitEpisodes > 0 || s.history.priorLatePickups >= 2 || s.daysOverdue > 0
+            val priorFailure = s.priorUnsuppressed > 0
+            if (lowLevelViremia || (adherenceRisk && priorFailure)) {
+                val reasons = listOfNotNull(
+                    if (lowLevelViremia) "low-level viraemia ($vl c/mL)" else null,
+                    if (priorFailure) "prior unsuppression (${s.priorUnsuppressed})" else null,
+                    if (adherenceRisk) "adherence gaps" else null,
+                ).joinToString(", ")
+                val pts = when {
+                    lowLevelViremia && (adherenceRisk || priorFailure) -> 14
+                    lowLevelViremia -> 10
+                    else -> 8
+                }
+                out += RiskFactor(RiskDomain.VIROLOGIC,
+                    "Virological-failure watch — $reasons; intensify adherence & repeat VL early", pts)
+            }
+        }
         if (s.viralLoadOverdue) out += RiskFactor(RiskDomain.VIROLOGIC, "Routine viral load overdue", 10)
     }
 
@@ -381,6 +405,9 @@ object PatientRiskEngine {
             return "PMTCT priority: trace today, confirm ART continuation and infant prophylaxis."
         if ((s.lastViralLoadResult ?: 0) >= 1000)
             return "Unsuppressed VL: book Enhanced Adherence Counselling and repeat VL after 3 sessions."
+        val vlNow = s.lastViralLoadResult
+        if (vlNow != null && vlNow in 200..999)
+            return "Low-level viraemia ($vlNow c/mL): reinforce adherence now and repeat VL early to catch failure."
 
         // Pre-IIT — the preventive window.
         if (approaching) {

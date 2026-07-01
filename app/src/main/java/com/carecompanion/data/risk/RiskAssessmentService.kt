@@ -114,11 +114,9 @@ class RiskAssessmentService @Inject constructor(
 
         // Adopted learned model, if any (guardrail + schema enforced in activeModel()).
         val learnedModel = ModelStore.activeModel()
-        // EAC cascade-failure head (second outcome) + VL history for its prior-unsuppressed feature.
+        // EAC head (2nd outcome) + VL history — also feeds the rule-based virological-failure watch.
         val eacHead = ModelStore.eacModel()
-        val vlByUuid = if (eacHead != null)
-            viralLoadHistoryDao.getByPersonUuids(clients.map { it.uuid }).groupBy { it.personUuid }
-        else emptyMap()
+        val vlByUuid = viralLoadHistoryDao.getByPersonUuids(clients.map { it.uuid }).groupBy { it.personUuid }
 
         val now = System.currentTimeMillis()
         val today = Date(now)
@@ -179,6 +177,7 @@ class RiskAssessmentService @Inject constructor(
                     viralLoadOverdue = vlOverdue,
                     eacSessionsCompleted = eacLatest?.sessions,
                     eacStage = eacLatest?.stage,
+                    priorUnsuppressed = vlByUuid[c.uuid]?.count { (it.resultNumeric ?: 0L) >= 1000L } ?: 0,
                     // TB / TPT
                     tbScreenOverdue = tbScreenOverdue,
                     tbSymptomatic = tbSymptomatic,
